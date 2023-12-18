@@ -1,6 +1,7 @@
 import { ComponentType } from 'react'
 import { waitForAny } from 'recoil'
 
+import { accountsSelector } from '@dao-dao/state/recoil'
 import {
   WalletBalances as StatelessWalletBalances,
   useCachedLoading,
@@ -8,25 +9,30 @@ import {
   useChain,
 } from '@dao-dao/stateless'
 import {
+  ActionKey,
   LazyNftCardInfo,
   LoadingData,
   LoadingDataWithError,
   TokenCardInfo,
 } from '@dao-dao/types'
-import { loadableToLoadingData } from '@dao-dao/utils'
+import { getMeTxPrefillPath, loadableToLoadingData } from '@dao-dao/utils'
 
+import { useActionForKey } from '../../actions'
 import {
   allWalletNftsSelector,
   hiddenBalancesSelector,
   tokenCardLazyInfoSelector,
   walletTokenCardInfosSelector,
 } from '../../recoil'
+import { ButtonLink } from '../ButtonLink'
+import { IconButtonLink } from '../IconButtonLink'
+import { TreasuryHistoryGraph } from '../TreasuryHistoryGraph'
 import { WalletTokenLine } from './WalletTokenLine'
 import { WalletTokenLineReadonly } from './WalletTokenLineReadonly'
 
 export type WalletBalancesProps = {
   address: string | undefined
-  hexPublicKey: LoadingData<string>
+  hexPublicKey: LoadingData<string | undefined>
   NftCard: ComponentType<LazyNftCardInfo>
   // If true, use token card that has edit actions.
   editable: boolean
@@ -39,6 +45,15 @@ export const WalletBalances = ({
   editable,
 }: WalletBalancesProps) => {
   const { chain_id: chainId } = useChain()
+
+  const accounts = useCachedLoadingWithError(
+    address
+      ? accountsSelector({
+          chainId,
+          address,
+        })
+      : undefined
+  )
 
   const tokensWithoutLazyInfo = useCachedLoadingWithError(
     address
@@ -104,16 +119,34 @@ export const WalletBalances = ({
   )
 
   const hiddenTokens = useCachedLoading(
-    !hexPublicKey.loading
+    !hexPublicKey.loading && hexPublicKey.data
       ? hiddenBalancesSelector(hexPublicKey.data)
       : undefined,
     []
   )
 
+  const configureRebalancerActionDefaults = useActionForKey(
+    ActionKey.ConfigureRebalancer
+  )?.useDefaults()
+
   return (
     <StatelessWalletBalances
+      ButtonLink={ButtonLink}
+      IconButtonLink={IconButtonLink}
       NftCard={NftCard}
       TokenLine={editable ? WalletTokenLine : WalletTokenLineReadonly}
+      TreasuryHistoryGraph={TreasuryHistoryGraph}
+      accounts={accounts}
+      configureRebalancerHref={
+        editable && configureRebalancerActionDefaults
+          ? getMeTxPrefillPath([
+              {
+                actionKey: ActionKey.ConfigureRebalancer,
+                data: configureRebalancerActionDefaults,
+              },
+            ])
+          : undefined
+      }
       hiddenTokens={hiddenTokens}
       nfts={nfts}
       tokens={tokens}

@@ -3,10 +3,13 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import {
+  AccountType,
   LazyNftCardInfo,
   TokenCardInfo,
+  ValenceAccount,
   WalletBalancesProps,
 } from '@dao-dao/types'
+import { areAccountsEqual } from '@dao-dao/utils'
 
 import { useButtonPopupSorter, useTokenSortOptions } from '../../hooks'
 import { Button } from '../buttons'
@@ -16,25 +19,42 @@ import { LineLoaders } from '../LineLoader'
 import { NftSection } from '../nft/NftSection'
 import { ButtonPopup } from '../popup'
 import { TokenLineHeader } from '../token/TokenLineHeader'
+import { ValenceAccountDisplay } from '../ValenceAccountDisplay'
 
 export const WalletBalances = <
   T extends TokenCardInfo,
   N extends LazyNftCardInfo
 >({
+  accounts,
   tokens,
   hiddenTokens,
   TokenLine,
   nfts,
   NftCard,
+  ...valenceAccountTreasuryProps
 }: WalletBalancesProps<T, N>) => {
   const { t } = useTranslation()
 
   const tokenSortOptions = useTokenSortOptions()
+
+  const valenceAccounts =
+    accounts.loading || accounts.errored
+      ? []
+      : accounts.data.filter(
+          (account): account is ValenceAccount =>
+            account.type === AccountType.Valence
+        )
+  // Separate valence from non-valence account tokens and display valence
+  // separately.
+  const nonValenceTokens =
+    tokens.loading || tokens.errored
+      ? []
+      : tokens.data.filter(({ owner }) => owner.type !== AccountType.Valence)
   const {
     sortedData: sortedTokens,
     buttonPopupProps: sortTokenButtonPopupProps,
   } = useButtonPopupSorter({
-    data: tokens.loading || tokens.errored ? undefined : tokens.data,
+    data: nonValenceTokens,
     options: tokenSortOptions,
   })
 
@@ -79,6 +99,29 @@ export const WalletBalances = <
                 ))}
               </div>
             )}
+
+            {/* Valence Accounts */}
+            {valenceAccounts.map((account) => (
+              <ValenceAccountDisplay<T>
+                {...valenceAccountTreasuryProps}
+                key={account.address}
+                TokenLine={TokenLine}
+                account={account}
+                className="mt-6"
+                tokens={
+                  tokens.loading || tokens.errored
+                    ? tokens
+                    : {
+                        loading: false,
+                        errored: false,
+                        updating: tokens.updating,
+                        data: tokens.data.filter(({ owner }) =>
+                          areAccountsEqual(owner, account)
+                        ),
+                      }
+                }
+              />
+            ))}
           </div>
         ) : tokens.errored ? (
           <ErrorPage error={tokens.error} />

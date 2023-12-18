@@ -80,6 +80,14 @@ export enum ActionKey {
   ManageSubDaoPause = 'manageSubDaoPause',
   UpdatePreProposeConfig = 'updatePreProposeConfig',
   UpdateProposalConfig = 'updateProposalConfig',
+  CreateValenceAccount = 'createValenceAccount',
+  ConfigureRebalancer = 'configureRebalancer',
+  // DaoProposalSingle
+  UpdatePreProposeSingleConfig = 'updatePreProposeSingleConfig',
+  UpdateProposalSingleConfig = 'updateProposalSingleConfig',
+  // DaoProposalMultiple
+  UpdatePreProposeMultipleConfig = 'updatePreProposeMultipleConfig',
+  UpdateProposalMultipleConfig = 'updateProposalMultipleConfig',
   // Press
   CreatePost = 'createPost',
   UpdatePost = 'updatePost',

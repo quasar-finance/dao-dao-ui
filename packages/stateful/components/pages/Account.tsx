@@ -31,6 +31,7 @@ import { walletProfileDataSelector } from '../../recoil'
 import { ButtonLink } from '../ButtonLink'
 import { PageHeaderContent } from '../PageHeaderContent'
 import { SuspenseLoader } from '../SuspenseLoader'
+import { AccountBalances } from './AccountBalances'
 import { AccountDaos } from './AccountDaos'
 
 export const Account: NextPage = () => {
@@ -135,6 +136,7 @@ export const Account: NextPage = () => {
 
       <ChainProvider chainId={configuredChain.chainId}>
         <StatelessAccount
+          AccountBalances={AccountBalances}
           AccountDaos={AccountDaos}
           ButtonLink={ButtonLink}
           SuspenseLoader={SuspenseLoader}
