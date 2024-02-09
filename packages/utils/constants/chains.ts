@@ -36,7 +36,7 @@ export const SUPPORTED_CHAINS: SupportedChainConfig[] = [
       // ContractVersion.V240
       CwPayrollFactory: 4042,
       CwTokenSwap: 4043,
-      CwTokenfactoryIssuer: 4045,
+      CwTokenfactoryIssuerOsmosis: 4045,
       CwVesting: 4046,
       DaoCore: 4047,
       DaoMigrator: 4048,
@@ -195,7 +195,7 @@ export const SUPPORTED_CHAINS: SupportedChainConfig[] = [
       // ContractVersion.V240
       CwPayrollFactory: 353,
       CwTokenSwap: 354,
-      CwTokenfactoryIssuer: 364,
+      CwTokenfactoryIssuerOsmosis: 364,
       CwVesting: 355,
       DaoCore: 365,
       DaoMigrator: -1, // not needed since only v2 DAOs exist
@@ -369,7 +369,7 @@ export const SUPPORTED_CHAINS: SupportedChainConfig[] = [
       // ContractVersion.V240
       CwPayrollFactory: 553,
       CwTokenSwap: 564,
-      CwTokenfactoryIssuer: 565,
+      CwTokenfactoryIssuerOsmosis: 565,
       CwVesting: 703,
       DaoCore: 567,
       DaoMigrator: -1, // not needed since only v2 DAOs exist
@@ -500,7 +500,7 @@ export const SUPPORTED_CHAINS: SupportedChainConfig[] = [
       // ContractVersion.V240
       CwPayrollFactory: 148,
       CwTokenSwap: 149,
-      CwTokenfactoryIssuer: 150,
+      CwTokenfactoryIssuerOsmosis: 150,
       CwVesting: 151,
       DaoCore: 153,
       DaoMigrator: -1, // not needed since only v2 DAOs exist
@@ -670,7 +670,8 @@ export const SUPPORTED_CHAINS: SupportedChainConfig[] = [
       // ContractVersion.V240
       CwPayrollFactory: 286,
       CwTokenSwap: 287,
-      CwTokenfactoryIssuer: 288,
+      CwTokenfactoryIssuerOsmosis: 401,
+      CwTokenfactoryIssuerCosmWasm: 288,
       CwVesting: 290,
       DaoCore: 291,
       DaoMigrator: -1,
@@ -824,7 +825,7 @@ export const SUPPORTED_CHAINS: SupportedChainConfig[] = [
       // ContractVersion.V240
       CwPayrollFactory: 4062,
       CwTokenSwap: 4063,
-      CwTokenfactoryIssuer: 4065,
+      CwTokenfactoryIssuerOsmosis: 4065,
       CwVesting: 4066,
       DaoCore: 4067,
       DaoMigrator: 4068,
@@ -872,7 +873,7 @@ export const SUPPORTED_CHAINS: SupportedChainConfig[] = [
       // ContractVersion.V240
       CwPayrollFactory: 5841,
       CwTokenSwap: 5842,
-      CwTokenfactoryIssuer: 5843,
+      CwTokenfactoryIssuerOsmosis: 5843,
       CwVesting: 5844,
       DaoCore: 5845,
       DaoMigrator: -1, // not needed since only v2 DAOs exist
@@ -914,7 +915,7 @@ export const SUPPORTED_CHAINS: SupportedChainConfig[] = [
       // ContractVersion.V240
       CwPayrollFactory: 3461,
       CwTokenSwap: 3462,
-      CwTokenfactoryIssuer: 3463,
+      CwTokenfactoryIssuerOsmosis: 3463,
       CwVesting: 3464,
       DaoCore: 3465,
       DaoMigrator: -1, // not needed since only v2 DAOs exist
@@ -958,7 +959,8 @@ export const SUPPORTED_CHAINS: SupportedChainConfig[] = [
       // ContractVersion.V240
       CwPayrollFactory: 3,
       CwTokenSwap: 4,
-      CwTokenfactoryIssuer: 5,
+      CwTokenfactoryIssuerOsmosis: 65,
+      CwTokenfactoryIssuerCosmWasm: 5,
       CwVesting: 6,
       DaoCore: 7,
       DaoMigrator: -1,

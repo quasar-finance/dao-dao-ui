@@ -146,7 +146,7 @@ export type CodeIdConfig = {
   // https://github.com/DA0-DA0/dao-contracts
   CwPayrollFactory: number
   CwTokenSwap: number
-  CwTokenfactoryIssuer: number
+  CwTokenfactoryIssuerOsmosis: number
   CwVesting: number
   DaoCore: number
   DaoMigrator: number
@@ -159,6 +159,10 @@ export type CodeIdConfig = {
   DaoVotingCw4: number
   DaoVotingCw721Staked: number
   DaoVotingTokenStaked: number
+
+  // For migrating Migaloo DAOs from cosmwasm to osmosis x/tokenfactory.
+  CwTokenfactoryIssuerCosmWasm?: number
+
   // v2.1.0 and below, for migrating v1 to v2 DAOs
   Cw20Stake?: number
   DaoVotingCw20Staked?: number

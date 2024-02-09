@@ -2,7 +2,8 @@
 export enum ContractName {
   Cw1Whitelist = 'crates.io:cw1-whitelist',
   CwTokenSwap = 'crates.io:cw-token-swap',
-  CwTokenfactoryIssuer = 'crates.io:cw-tokenfactory-issuer',
+  // This contract left out the `crates.io:` prefix.
+  CwTokenfactoryIssuer = 'cw-tokenfactory-issuer',
   PolytoneProxy = 'crates.io:polytone-proxy',
   PreProposeSingle = 'crates.io:dao-pre-propose-single',
   PreProposeApprovalSingle = 'crates.io:dao-pre-propose-approval-single',

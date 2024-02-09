@@ -79,7 +79,7 @@ export const mutate: DaoCreatorMutate<CreatorData> = (
       active_threshold,
       token_info: {
         new: {
-          token_issuer_code_id: codeIds.CwTokenfactoryIssuer,
+          token_issuer_code_id: codeIds.CwTokenfactoryIssuerOsmosis,
           subdenom: symbol.toLowerCase(),
           initial_balances: microInitialBalances,
           initial_dao_balance: microInitialTreasuryBalance,
