@@ -1427,6 +1427,6 @@ chains
     })
   })
 
-export const VALENCE_SUPPORTED_CHAINS = Object.entries(SUPPORTED_CHAINS)
-  .filter(([, { valence }]) => valence)
-  .map(([chainId]) => chainId as ChainId)
+export const VALENCE_SUPPORTED_CHAINS = SUPPORTED_CHAINS.filter(
+  ({ valence }) => valence
+).map(({ chainId }) => chainId as ChainId)
