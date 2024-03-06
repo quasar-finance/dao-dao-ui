@@ -1193,7 +1193,7 @@ export const SUPPORTED_CHAINS: SupportedChainConfig[] = [
     mainnet: false,
     accentColor: '#3ccd64',
     factoryContractAddress:
-      'migaloo1wug8sewp6cedgkmrmvhl3lf3tulagm9hnvy8p0rppz9yjw0g4wtqvk723g',
+      'quasar1sjce8d68wuf8g6rta23du4ellyt3j4hw3yhwxt29d8n48cjygevsanfvsc',
     explorerUrlTemplates: {
       tx: 'https://testnet.ping.pub/Quasar%20Test/tx/REPLACE',
       gov: 'https://testnet.ping.pub//Quasar%20Test/gov',
@@ -1300,7 +1300,7 @@ export const CHAIN_ENDPOINTS: Partial<
   },
   [ChainId.QuasarTestnet]: {
     rpc: 'https://quasar-testnet-rpc.polkachu.com',
-    rest: 'https://quasar-testnet-api.polkachu.com/',
+    rest: 'https://quasar-testnet-api.polkachu.com',
   },
 }
 
