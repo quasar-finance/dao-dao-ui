@@ -12,7 +12,7 @@
     "protobuf": "npm run protobuf:codegen && npm run protobuf:patch"
   },
   "dependencies": {
-    "@chain-registry/assets": "^1.26.1",
+    "@chain-registry/assets": "^1.30.0",
     "@cosmjs/amino": "^0.32.1",
     "@cosmjs/cosmwasm-stargate": "^0.32.1",
     "@cosmjs/encoding": "^0.32.1",
@@ -20,7 +20,7 @@
     "@cosmjs/tendermint-rpc": "^0.32.1",
     "@sentry/nextjs": "^7.7.0",
     "ajv": "^8.11.0",
-    "chain-registry": "^1.26.0",
+    "chain-registry": "^1.29.0",
     "json5": "^2.2.0",
     "lodash.clonedeep": "^4.5.0",
     "long": "^5.2.1",
@@ -33,7 +33,7 @@
     "uuid": "^9.0.0"
   },
   "devDependencies": {
-    "@chain-registry/types": "^0.17.1",
+    "@chain-registry/types": "^0.18.1",
     "@cosmjs/proto-signing": "^0.32.1",
     "@cosmology/telescope": "^1.4.12",
     "@dao-dao/config": "2.2.0",
