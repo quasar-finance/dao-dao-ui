@@ -3220,13 +3220,13 @@
   resolved "https://registry.yarnpkg.com/@bcoe/v8-coverage/-/v8-coverage-0.2.3.tgz#75a2e8b51cb758a7553d6804a5932d7aace75c39"
   integrity sha512-0hYQ8SB4Db5zvZB4axdMHGwEaQjkZzFjQiN9LVYvIFB2nSUHW9tYpxWriPrWDASIxiaXax83REcLxuSdnGPZtw==
 
-"@chain-registry/assets@^1.22.0":
-  version "1.22.0"
-  resolved "https://registry.yarnpkg.com/@chain-registry/assets/-/assets-1.22.0.tgz#40909762c3e18c9983af5df4f1cd1e2cd5488f9c"
-  integrity sha512-DIh0bzyKF+rLueiks4XCVHwwXLSxdVfDFurxA4Pdy+aVaigt8sFNgQI4Ffb99g4Lm8EpyG2hDR646A2Nx8T2nA==
+"@chain-registry/assets@^1.30.0":
+  version "1.30.1"
+  resolved "https://registry.yarnpkg.com/@chain-registry/assets/-/assets-1.30.1.tgz#032492672477e2152f705d16a5459cac56c611d1"
+  integrity sha512-OAN1KCcW6cNpfsYbZTge5S0LnnHCC8x6pBJz0Oz+Ag4D3pEHHBqdr0DBrBoTf+M2JJrK9aRPBOGhix3h2wDKTg==
   dependencies:
     "@babel/runtime" "^7.21.0"
-    "@chain-registry/types" "^0.17.0"
+    "@chain-registry/types" "^0.18.1"
 
 "@chain-registry/cosmostation@1.23.0", "@chain-registry/cosmostation@^1.23.0":
   version "1.23.0"
@@ -3269,6 +3269,13 @@
   version "0.16.0"
   resolved "https://registry.yarnpkg.com/@chain-registry/types/-/types-0.16.0.tgz#f76409186899a976d33693d7f458c33d71a66730"
   integrity sha512-4j6vq2Vqn/nF+UBjvRPUVs6eM3+5rJ+dPmEWpd/OoNH3wTy1k6aoilcSTZRR//vGcI5EOVGsxhhJxUzo2qqweA==
+  dependencies:
+    "@babel/runtime" "^7.21.0"
+
+"@chain-registry/types@^0.18.1":
+  version "0.18.1"
+  resolved "https://registry.yarnpkg.com/@chain-registry/types/-/types-0.18.1.tgz#bd926ddf204f2ae986a79b42f0cfe85764e2977a"
+  integrity sha512-H/UnOyd7WdcWHa2FGKxy4MclDDFrbE2rFwaUh9oubNJOey7UBI4dNF10oZIWM/1by15LUgDz45fVbh6uA6W5Tg==
   dependencies:
     "@babel/runtime" "^7.21.0"
 
@@ -13857,13 +13864,13 @@ chain-registry@^1.19.0:
     "@babel/runtime" "^7.21.0"
     "@chain-registry/types" "^0.16.0"
 
-chain-registry@^1.21.0:
-  version "1.21.0"
-  resolved "https://registry.yarnpkg.com/chain-registry/-/chain-registry-1.21.0.tgz#4e781d464035d64996aa80e01fe80ddb8ba3f3fa"
-  integrity sha512-DkhulMvok8wRClECDHOPLylVfmE4yl/ilkVO+Ht6XLz34oq5bJbleblSRhvYc1pjFg8AJ7FmXGvxkrWA6LdTHg==
+chain-registry@^1.29.0:
+  version "1.29.1"
+  resolved "https://registry.yarnpkg.com/chain-registry/-/chain-registry-1.29.1.tgz#15b0392af72a95ec6eab5f4c74cb8f28eec1b80f"
+  integrity sha512-1VdBKme094W3NzsQO7rZkCtGVYnxFGtouv6o+qBdwcRsBUqrhD+QCfNhvuQXa10vKnnpByIDlO9Xg10mx/3KWw==
   dependencies:
     "@babel/runtime" "^7.21.0"
-    "@chain-registry/types" "^0.17.0"
+    "@chain-registry/types" "^0.18.1"
 
 chalk@3.0.0:
   version "3.0.0"
