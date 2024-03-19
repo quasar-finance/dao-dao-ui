@@ -675,6 +675,44 @@ export const SUPPORTED_CHAINS: SupportedChainConfig[] = [
       DaoVotingTokenStaked: 53,
     },
   },
+  {
+    chainId: ChainId.QuasarMainnet,
+    name: 'quasar',
+    mainnet: true,
+    accentColor: '#3ccd64',
+    factoryContractAddress:
+      'quasar1yvemqv54jpy87zg8d22j8ms6rnuys4ezrrnhveh759q55vt0cgyqfv6p0r',
+    explorerUrlTemplates: {
+      tx: 'https://ping.pub/Quasar/tx/REPLACE',
+      gov: 'https://ping.pub//Quasar/gov',
+      govProp: 'https://ping.pub/Quasar/gov/REPLACE',
+      wallet: 'https://ping.pub/Quasar/account/REPLACE',
+    },
+    codeIds: {
+      // https://github.com/CosmWasm/cw-plus
+      // Cw1Whitelist: 60, // NA
+      Cw4Group: 53, // v0.16
+      // https://github.com/CosmWasm/cw-nfts
+      Cw721Base: 54,
+
+      // ContractVersion.V240
+      CwPayrollFactory: 67,
+      CwTokenSwap: 69,
+      CwTokenfactoryIssuer: 71,
+      CwVesting: 73,
+      DaoCore: 77,
+      DaoMigrator: 79,
+      DaoPreProposeApprovalSingle: 81,
+      DaoPreProposeApprover: 83,
+      DaoPreProposeMultiple: 58,
+      DaoPreProposeSingle: 57,
+      DaoProposalMultiple: 64,
+      DaoProposalSingle: 66,
+      DaoVotingCw4: 76,
+      DaoVotingCw721Staked: 80,
+      DaoVotingTokenStaked: 82,
+    },
+  },
 ]
 
 export const POLYTONE_CONFIG_PER_CHAIN: [ChainId, PolytoneConfig][] =
