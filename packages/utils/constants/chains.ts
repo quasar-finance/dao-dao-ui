@@ -770,6 +770,10 @@ export const CHAIN_ENDPOINTS: Partial<
     rpc: 'https://migaloo-rpc.polkachu.com',
     rest: 'https://migaloo-api.polkachu.com',
   },
+  [ChainId.QuasarMainnet]: {
+    rpc: 'https://quasar-rpc.polkachu.com',
+    rest: 'https://quasar-api.polkachu.com',
+  },
 }
 
 // All configured chains. Configured chains are either supported chains, which
