@@ -650,9 +650,14 @@ export const SUPPORTED_CHAINS: SupportedChainConfig[] = [
       govProp: 'https://testnet.ping.pub/Quasar%20Test/gov/REPLACE',
       wallet: 'https://testnet.ping.pub/Quasar%20Test/account/REPLACE',
     },
+    indexes: {
+      search: 'quasar_testnet_daos',
+      // Use same as mainnet.
+      featured: 'quasar_featured_daos',
+    },
     codeIds: {
       // https://github.com/CosmWasm/cw-plus
-      Cw1Whitelist: 60,
+      // Cw1Whitelist: 60,
       Cw4Group: 58, // v0.16
       // https://github.com/CosmWasm/cw-nfts
       Cw721Base: 59,
@@ -664,8 +669,8 @@ export const SUPPORTED_CHAINS: SupportedChainConfig[] = [
       CwVesting: 35,
       DaoCore: 36,
       DaoMigrator: 37,
-      DaoPreProposeApprovalSingle: 38,
-      DaoPreProposeApprover: 39,
+      // DaoPreProposeApprovalSingle: 38,
+      // DaoPreProposeApprover: 39,
       DaoPreProposeMultiple: 40,
       DaoPreProposeSingle: 41,
       DaoProposalMultiple: 44,
@@ -688,6 +693,11 @@ export const SUPPORTED_CHAINS: SupportedChainConfig[] = [
       govProp: 'https://ping.pub/Quasar/gov/REPLACE',
       wallet: 'https://ping.pub/Quasar/account/REPLACE',
     },
+    indexes: {
+      search: 'quasar_daos',
+      // Use same as mainnet.
+      featured: 'quasar_featured_daos',
+    },
     codeIds: {
       // https://github.com/CosmWasm/cw-plus
       // Cw1Whitelist: 60, // NA
@@ -702,8 +712,8 @@ export const SUPPORTED_CHAINS: SupportedChainConfig[] = [
       CwVesting: 73,
       DaoCore: 77,
       DaoMigrator: 79,
-      DaoPreProposeApprovalSingle: 81,
-      DaoPreProposeApprover: 83,
+      // DaoPreProposeApprovalSingle: 81,
+      // DaoPreProposeApprover: 83,
       DaoPreProposeMultiple: 58,
       DaoPreProposeSingle: 57,
       DaoProposalMultiple: 64,
