@@ -7,7 +7,8 @@
   ],
   "scripts": {
     "postinstall": "patch-package",
-    "build": "turbo run build --continue --filter=\"!@dao-dao/storybook\"",
+    "build:original": "turbo run build --continue --filter=\"!@dao-dao/storybook\"",
+    "build": "turbo run build --filter=@dao-dao/dapp",
     "build:no-apps": "turbo run build --continue --filter=\"!@dao-dao/storybook\" --filter=\"!@dao-dao/dapp\" --filter=\"!@dao-dao/sda\"",
     "dev": "yarn dapp dev",
     "start": "yarn dapp start",
