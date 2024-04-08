@@ -20,17 +20,17 @@ application, we are using Github Actions to deploy this applcation to Vercel.
 
 ### Vercel Preview
 - This workflow runs on any branch that isn't `main` and uses Vercel credentials to...
-- authenticate with Github Secrets,
-- pull preview build environment from Vercel,
-- build the packages on the Github Actions runner, and
-- deploy to preview the previously built packages.
+  - authenticate with Github Secrets,
+  - pull preview build environment from Vercel,
+  - build the packages on the Github Actions runner, and
+  - deploy to preview the previously built packages.
 
 ### Vercel Production
 - This workflow runs on branch, `main`, and uses Vercel credentials to...
-- authenticate with Github Secrets,
-- pull production build environment from Vercel,
-- build the packages on the Github Actions runner, and
-- deploy to preview the previously built packages.
+  - authenticate with Github Secrets,
+  - pull production build environment from Vercel,
+  - build the packages on the Github Actions runner, and
+  - deploy to preview the previously built packages.
 
 ## Development
 
