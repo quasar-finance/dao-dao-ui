@@ -14,6 +14,24 @@ You can find more info in our [documentation](https://docs.daodao.zone). Join
 the [DAO DAO Discord](https://discord.gg/sAaGuyW3D2) if you're interested in
 becoming a contributor.
 
+## Deployment with Vercel
+Because of the server memory resource requirements for the build of this
+application, we are using Github Actions to deploy this applcation to Vercel.
+
+### Vercel Preview
+- This workflow runs on any branch that isn't `main` and uses Vercel credentials to...
+  - authenticate with Github Secrets,
+  - pull preview build environment from Vercel,
+  - build the packages on the Github Actions runner, and
+  - deploy to preview the previously built packages.
+
+### Vercel Production
+- This workflow runs on branch, `main`, and uses Vercel credentials to...
+  - authenticate with Github Secrets,
+  - pull production build environment from Vercel,
+  - build the packages on the Github Actions runner, and
+  - deploy to preview the previously built packages.
+
 ## Development
 
 ### Clone this repo and install dependencies
