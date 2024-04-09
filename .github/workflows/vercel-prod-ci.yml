@@ -5,7 +5,7 @@ env:
 on:
   push:
     branches:
-      - ${{ vars.CI_DEFAULT_BRANCH }}
+      - development_2.3
 jobs:
   Deploy-Production:
     runs-on: ubuntu-latest
