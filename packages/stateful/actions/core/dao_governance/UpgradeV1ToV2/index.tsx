@@ -227,14 +227,17 @@ export const makeUpgradeV1ToV2Action: ActionMaker<UpgradeV1ToV2Data> = ({
     // Get proposal module deposit info to pass through to pre-propose.
     const depositInfoSelectors = availableDaos?.map(
       ({ address: coreAddress, proposalModules }) =>
-        proposalModules.map(
-          (proposalModule) =>
-            matchAndLoadCommon(proposalModule, {
-              chain,
-              coreAddress,
-            }).selectors.depositInfo
-        )
-    )
+        proposalModules.map((proposalModule) => {
+          if (proposalModule.contractName === 'crates.io:dao-proposal-single-instant') {
+            return null;
+          }
+          return matchAndLoadCommon(proposalModule, {
+            chain,
+            coreAddress,
+          }).selectors.depositInfo;
+        })
+    );
+
     // The deposit infos are ordered to match the proposal modules in the DAO
     // core list, which is what the migration contract expects.
     const proposalModuleDepositInfosLoadable = useCachedLoadable(

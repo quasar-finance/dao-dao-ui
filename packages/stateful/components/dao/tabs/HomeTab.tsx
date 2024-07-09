@@ -34,15 +34,18 @@ export const HomeTab = () => {
 
   const depositInfoSelectors = useMemo(
     () =>
-      daoInfo.proposalModules.map(
-        (proposalModule) =>
-          matchAndLoadCommon(proposalModule, {
-            chain,
-            coreAddress: daoInfo.coreAddress,
-          }).selectors.depositInfo
-      ),
+      daoInfo.proposalModules.map((proposalModule) => {
+        if (proposalModule.contractName === 'crates.io:dao-proposal-single-instant') {
+          return null;
+        }
+        return matchAndLoadCommon(proposalModule, {
+          chain,
+          coreAddress: daoInfo.coreAddress,
+        }).selectors.depositInfo;
+      }),
     [chain, daoInfo.coreAddress, daoInfo.proposalModules]
-  )
+  );
+
   const proposalModuleDepositInfosLoadable = useCachedLoadable(
     waitForAll(depositInfoSelectors)
   )

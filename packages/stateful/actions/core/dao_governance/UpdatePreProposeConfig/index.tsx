@@ -28,21 +28,24 @@ const useUpdatePreProposeConfigActions = (): ProposalModuleWithAction[] => {
     () =>
       proposalModules.flatMap(
         (proposalModule): ProposalModuleWithAction | [] => {
+          if (proposalModule.contractName === 'crates.io:dao-proposal-single-instant') {
+            return [];
+          }
           const action = matchAndLoadCommon(proposalModule, {
             chain: options.chain,
             coreAddress,
-          }).fields.updatePreProposeConfigActionMaker?.(options)
+          }).fields.updatePreProposeConfigActionMaker?.(options);
 
           return action
             ? {
-                proposalModule,
-                action,
-              }
-            : []
+              proposalModule,
+              action,
+            }
+            : [];
         }
       ),
     [coreAddress, options, proposalModules]
-  )
+  );
 
   return proposalModuleActions
 }

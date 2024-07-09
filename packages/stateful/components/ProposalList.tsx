@@ -67,15 +67,20 @@ export const ProposalList = () => {
   // Get selectors for all proposal modules so we can list proposals.
   const commonSelectors = useMemo(
     () =>
-      proposalModules.map((proposalModule) => ({
-        selectors: matchAndLoadCommon(proposalModule, {
-          chain,
-          coreAddress,
-        }).selectors,
-        proposalModule,
-      })),
+      proposalModules.map((proposalModule) => {
+        if (proposalModule.contractName === 'crates.io:dao-proposal-single-instant') {
+          return { selectors: {}, proposalModule };
+        }
+        return {
+          selectors: matchAndLoadCommon(proposalModule, {
+            chain,
+            coreAddress,
+          }).selectors,
+          proposalModule,
+        };
+      }),
     [chain, coreAddress, proposalModules]
-  )
+  );
 
   // Cursor values for each proposal module for incremental queries.
   const [startBefores, setStartBefores] = useState<
