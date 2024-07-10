@@ -5,7 +5,7 @@ env:
 on:
   push:
     branches-ignore:
-      - development_2.3
+      - development_2.4_skn
 jobs:
   Deploy-Preview:
     runs-on: ubuntu-latest
