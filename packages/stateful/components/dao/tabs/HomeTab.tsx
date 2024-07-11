@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-import { waitForAll } from 'recoil'
+import { atom, waitForAll } from 'recoil'
 
 import {
   DaoSplashHeader,
@@ -36,7 +36,10 @@ export const HomeTab = () => {
     () =>
       daoInfo.proposalModules.map((proposalModule) => {
         if (proposalModule.contractName === 'crates.io:dao-proposal-single-instant') {
-          return null;
+          return atom({
+            key: 'dummyRecoilState',
+            default: null,
+          });
         }
         return matchAndLoadCommon(proposalModule, {
           chain,

@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { useSetRecoilState, waitForAll } from 'recoil'
+import { atom, useSetRecoilState, waitForAll } from 'recoil'
 
 import { updateProfileNftVisibleAtom } from '@dao-dao/state/recoil'
 import {
@@ -44,16 +44,19 @@ export const ProfileProposalCard = () => {
 
   const depositInfoSelectors = useMemo(
     () =>
-      daoInfo.proposalModules.map((proposalModule) => {
+      proposalModules.map((proposalModule) => {
         if (proposalModule.contractName === 'crates.io:dao-proposal-single-instant') {
-          return null;
+          return atom({
+            key: 'dummyRecoilState',
+            default: null,
+          });
         }
         return matchAndLoadCommon(proposalModule, {
           chain,
-          coreAddress: daoInfo.coreAddress,
+          coreAddress: coreAddress,
         }).selectors.depositInfo;
       }),
-    [chain, daoInfo.coreAddress, daoInfo.proposalModules]
+    [chain, coreAddress, proposalModules]
   );
 
   const proposalModuleDepositInfosLoadable = useCachedLoadable(

@@ -1,5 +1,5 @@
 import { useCallback, useMemo } from 'react'
-import { useRecoilValueLoadable, waitForAll, waitForAllSettled } from 'recoil'
+import { atom, useRecoilValueLoadable, waitForAll, waitForAllSettled } from 'recoil'
 
 import {
   DaoCoreV2Selectors,
@@ -229,7 +229,10 @@ export const makeUpgradeV1ToV2Action: ActionMaker<UpgradeV1ToV2Data> = ({
       ({ address: coreAddress, proposalModules }) =>
         proposalModules.map((proposalModule) => {
           if (proposalModule.contractName === 'crates.io:dao-proposal-single-instant') {
-            return null;
+            return atom({
+              key: 'dummyRecoilState',
+              default: null,
+            });
           }
           return matchAndLoadCommon(proposalModule, {
             chain,
