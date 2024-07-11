@@ -76,6 +76,7 @@ export const DAO_PROPOSAL_SINGLE_CONTRACT_NAMES = [
   // V2+
   'crates.io:cwd-proposal-single',
   'crates.io:dao-proposal-single',
+  'crates.io:dao-proposal-single-instant',
   // Neutron
   'crates.io:cwd-subdao-proposal-single',
 ]

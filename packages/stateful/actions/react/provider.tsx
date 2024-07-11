@@ -89,19 +89,15 @@ export const DaoActionsProvider = ({ children }: ActionsProviderProps) => {
   // Get all actions for all proposal module adapters.
   const proposalModuleActionCategoryMakers = useMemo(
     () =>
-      info.proposalModules.flatMap((proposalModule) => {
-        if (proposalModule.contractName === 'crates.io:dao-proposal-single-instant') {
-          return [];
-        }
-        return (
+      info.proposalModules.flatMap(
+        (proposalModule) =>
           matchAndLoadCommon(proposalModule, {
             chain: chainContext.chain,
             coreAddress: info.coreAddress,
           }).fields.actionCategoryMakers || []
-        );
-      }),
+      ),
     [chainContext.chain, info.coreAddress, info.proposalModules]
-  );
+  )
 
   const loadingWidgets = useWidgets()
   const loadedWidgets = loadingWidgets.loading ? undefined : loadingWidgets.data

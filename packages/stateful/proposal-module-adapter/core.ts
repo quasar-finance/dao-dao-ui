@@ -12,6 +12,7 @@ import {
 import {
   DaoProposalMultipleAdapter,
   DaoProposalSingleAdapter,
+  DaoProposalSingleInstantAdapter
 } from './adapters'
 
 // Adapters need to be loaded lazily like this, as opposed to just defining a
@@ -24,6 +25,7 @@ import {
 // This is a problem to solve later.
 export const getAdapters = (): readonly ProposalModuleAdapter[] => [
   DaoProposalSingleAdapter,
+  DaoProposalSingleInstantAdapter,
   DaoProposalMultipleAdapter,
 ]
 
