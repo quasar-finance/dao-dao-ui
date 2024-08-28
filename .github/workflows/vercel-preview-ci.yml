@@ -8,7 +8,8 @@ on:
       - development_2.3
 jobs:
   Deploy-Preview:
-    runs-on: ubuntu-latest
+    runs-on:
+      labels: ubuntu-latest-8-cores
     steps:
       - uses: actions/checkout@v2
       - name: Install Vercel CLI
@@ -16,6 +17,6 @@ jobs:
       - name: Pull Vercel Environment Information
         run: vercel pull --yes --environment=preview --token=${{ secrets.VERCEL_TOKEN }}
       - name: Build Project Artifacts
-        run: vercel build --token=${{ secrets.VERCEL_TOKEN }}
+        run: NODE_OPTIONS="--max-old-space-size=6144" vercel build --token=${{ secrets.VERCEL_TOKEN }}
       - name: Deploy Project Artifacts to Vercel
         run: vercel deploy --prebuilt --token=${{ secrets.VERCEL_TOKEN }}

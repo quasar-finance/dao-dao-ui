@@ -37,7 +37,7 @@
   },
   "engines": {
     "npm": ">=7.0.0",
-    "node": "18"
+    "node": ">=14.0.0"
   },
   "prettier": "@dao-dao/config/prettier",
   "packageManager": "yarn@1.22.11",
