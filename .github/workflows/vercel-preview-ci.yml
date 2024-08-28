@@ -8,8 +8,7 @@ on:
       - development_2.3
 jobs:
   Deploy-Preview:
-    runs-on:
-      labels: ubuntu-latest-8-cores
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
       - name: Install Vercel CLI
