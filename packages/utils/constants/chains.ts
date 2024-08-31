@@ -1731,7 +1731,7 @@ export const SUPPORTED_CHAINS: SupportedChainConfig[] = [
       // ContractVersion.V240
       CwPayrollFactory: 32,
       CwTokenSwap: 34,
-      CwTokenfactoryIssuer: 33,
+      // CwTokenfactoryIssuer: 33,
       CwVesting: 35,
       DaoCore: 36,
       DaoMigrator: 37,
