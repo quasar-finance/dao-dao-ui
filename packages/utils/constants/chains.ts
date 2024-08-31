@@ -2886,6 +2886,10 @@ export const CHAIN_ENDPOINTS: Partial<
     rpc: 'https://rpc.pulsar.scrttestnet.com',
     rest: 'https://api.pulsar.scrttestnet.com',
   },
+   [ChainId.QuasarTestnet]: {
+    rpc: 'https://quasar-testnet-rpc.polkachu.com/',
+    rest: 'https://quasar-testnet-api.polkachu.com/',
+  },
 }
 
 // The chains not to show in the governance UI.
