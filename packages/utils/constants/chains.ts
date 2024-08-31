@@ -1723,7 +1723,7 @@ export const SUPPORTED_CHAINS: SupportedChainConfig[] = [
     },
     codeIds: {
       // https://github.com/CosmWasm/cw-plus
-      // Cw1Whitelist: 60,
+      Cw1Whitelist: 60,
       Cw4Group: 58, // v0.16
       // https://github.com/CosmWasm/cw-nfts
       Cw721Base: 59,
@@ -1735,8 +1735,8 @@ export const SUPPORTED_CHAINS: SupportedChainConfig[] = [
       CwVesting: 35,
       DaoCore: 36,
       DaoMigrator: 37,
-      // DaoPreProposeApprovalSingle: 38,
-      // DaoPreProposeApprover: 39,
+      DaoPreProposeApprovalSingle: 38,
+       DaoPreProposeApprover: 39,
       DaoPreProposeMultiple: 40,
       DaoPreProposeSingle: 41,
       DaoProposalMultiple: 44,
