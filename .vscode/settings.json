@@ -33,6 +33,10 @@
     {
       "pattern": "packages/*",
       "!cwd": false
+    },
+    {
+      "pattern": "node_modules/*",
+      "!cwd": false
     }
   ],
   "eslint.validate": [
