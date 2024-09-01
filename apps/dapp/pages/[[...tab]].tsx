@@ -33,94 +33,113 @@ export const getStaticProps: GetStaticProps<StatefulHomeProps> = async ({
   params,
 }) => {
   const tabPath =
-    params?.tab && Array.isArray(params?.tab) ? params.tab[0] : undefined
+  params?.tab && Array.isArray(params?.tab) ? params.tab[0] : undefined
 
-  // If defined, try to find matching chain. If found, show chain-only page.
-  const selectedChain = tabPath
-    ? getSupportedChains().find(({ name }) => name === tabPath)
-    : undefined
-  const chainId = selectedChain?.chainId
+// If defined, try to find matching chain. If found, show chain-only page.
+const selectedChain = tabPath
+  ? getSupportedChains().find(({ name }) => name === tabPath)
+  : undefined
+const chainId = selectedChain?.chainId
 
-  const chainGovDaos = chainId
-    ? selectedChain.noGov
-      ? undefined
-      : [getDaoInfoForChainId(chainId, [])]
-    : // Get chain x/gov DAOs if not on a chain-specific home.
-      [
-        // Add DAO DAO-supported chains.
-        ...getSupportedChains().flatMap(({ chainId, noGov }) =>
-          noGov ? [] : chainId
-        ),
-        // Add some other common chains.
-        ...(MAINNET
-          ? [
-              'akashnet-2',
-              'secret-4',
-              'regen-1',
-              'injective-1',
-              'celestia',
-              'archway-1',
-            ]
-          : []),
-      ].map((chainId) => getDaoInfoForChainId(chainId, []))
+const chainGovDaos = chainId
+  ? selectedChain.noGov
+    ? undefined
+    : [getDaoInfoForChainId(chainId, [])]
+  : // Get chain x/gov DAOs if not on a chain-specific home.
+    [
+      // Add DAO DAO-supported chains.
+      ...getSupportedChains().flatMap(({ chainId, noGov }) =>
+        noGov ? [] : chainId
+      ),
+      // Add some other common chains.
+      ...(MAINNET
+        ? [
+            'akashnet-2',
+            'secret-4',
+            'regen-1',
+            'injective-1',
+            'celestia',
+            'archway-1',
+          ]
+        : []),
+    ].map((chainId) => getDaoInfoForChainId(chainId, []))
 
-  const [i18nProps, tvl, allStats, monthStats, weekStats] = await Promise.all([
-    // Get i18n translations props.
-    serverSideTranslations(locale, ['translation']),
+const [i18nProps, tvl, allStats, monthStats, weekStats] = await Promise.all([
+  // Get i18n translations props.
+  serverSideTranslations(locale, ['translation']),
 
-    // Get all or chain-specific stats and TVL.
-    !chainId || chainIsIndexed(chainId)
-      ? queryClient
-          .fetchQuery(
-            indexerQueries.snapper<number>({
-              query: chainId ? 'daodao-chain-tvl' : 'daodao-all-tvl',
-              parameters: chainId ? { chainId } : undefined,
-            })
-          )
-          .catch(() => 0)
-      : null,
-    !chainId || chainIsIndexed(chainId)
-      ? queryClient.fetchQuery(
-          indexerQueries.snapper<DaoDaoIndexerChainStats>({
-            query: chainId ? 'daodao-chain-stats' : 'daodao-all-stats',
+  // Get all or chain-specific stats and TVL.
+  !chainId || chainIsIndexed(chainId)
+    ? queryClient
+        .fetchQuery(
+          indexerQueries.snapper<number>({
+            query: chainId ? 'daodao-chain-tvl' : 'daodao-all-tvl',
             parameters: chainId ? { chainId } : undefined,
           })
         )
-      : null,
-    !chainId || chainIsIndexed(chainId)
-      ? queryClient.fetchQuery(
-          indexerQueries.snapper<DaoDaoIndexerChainStats>({
-            query: chainId ? 'daodao-chain-stats' : 'daodao-all-stats',
-            parameters: {
-              ...(chainId ? { chainId } : undefined),
-              daysAgo: 30,
-            },
-          })
-        )
-      : null,
-    !chainId || chainIsIndexed(chainId)
-      ? queryClient.fetchQuery(
-          indexerQueries.snapper<DaoDaoIndexerChainStats>({
-            query: chainId ? 'daodao-chain-stats' : 'daodao-all-stats',
-            parameters: {
-              ...(chainId ? { chainId } : undefined),
-              daysAgo: 7,
-            },
-          })
-        )
-      : null,
+        .catch((error) => {
+          console.error(`Error fetching TVL for chain ${chainId}:`, error)
+          return null
+        })
+    : null,
+  !chainId || chainIsIndexed(chainId)
+    ? queryClient.fetchQuery(
+        indexerQueries.snapper<DaoDaoIndexerChainStats>({
+          query: chainId ? 'daodao-chain-stats' : 'daodao-all-stats',
+          parameters: chainId ? { chainId } : undefined,
+        })
+      )
+        .catch((error) => {
+          console.error(`Error fetching stats for chain ${chainId}:`, error)
+          return null
+        })
+    : null,
+  !chainId || chainIsIndexed(chainId)
+    ? queryClient.fetchQuery(
+        indexerQueries.snapper<DaoDaoIndexerChainStats>({
+          query: chainId ? 'daodao-chain-stats' : 'daodao-all-stats',
+          parameters: {
+            ...(chainId ? { chainId } : undefined),
+            daysAgo: 30,
+          },
+        })
+      )
+        .catch((error) => {
+          console.error(`Error fetching 30-day stats for chain ${chainId}:`, error)
+          return null
+        })
+    : null,
+  !chainId || chainIsIndexed(chainId)
+    ? queryClient.fetchQuery(
+        indexerQueries.snapper<DaoDaoIndexerChainStats>({
+          query: chainId ? 'daodao-chain-stats' : 'daodao-all-stats',
+          parameters: {
+            ...(chainId ? { chainId } : undefined),
+            daysAgo: 7,
+          },
+        })
+      )
+        .catch((error) => {
+          console.error(`Error fetching 7-day stats for chain ${chainId}:`, error)
+          return null
+        })
+    : null,
 
-    // Pre-fetch featured DAOs.
-    queryClient
-      .fetchQuery(daoQueries.listFeatured())
-      .then((featured) =>
-        Promise.all(
-          featured?.map((dao) =>
-            queryClient.fetchQuery(statefulDaoQueries.info(queryClient, dao))
-          ) || []
-        )
-      ),
-  ])
+  // Pre-fetch featured DAOs.
+  queryClient
+    .fetchQuery(daoQueries.listFeatured())
+    .then((featured) =>
+      Promise.all(
+        featured?.map((dao) =>
+          queryClient.fetchQuery(statefulDaoQueries.info(queryClient, dao))
+        ) || []
+      )
+    )
+    .catch((error) => {
+      console.error(`Error fetching featured DAOs:`, error)
+      return []
+    }),
+])
 
   return {
     props: {
