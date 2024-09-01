@@ -79,9 +79,9 @@ export const getStaticProps: GetStaticProps<StatefulHomeProps> = async ({
           )
           .catch((error) => {
             console.error(`Error fetching TVL for chain ${chainId}:`, error)
-            return null
+            return 0 // Default value
           })
-      : null,
+      : 0,
     !chainId || chainIsIndexed(chainId)
       ? queryClient
           .fetchQuery(
@@ -92,9 +92,9 @@ export const getStaticProps: GetStaticProps<StatefulHomeProps> = async ({
           )
           .catch((error) => {
             console.error(`Error fetching stats for chain ${chainId}:`, error)
-            return null
+            return { total: 0, unique: 0, active: 0 } // Default value
           })
-      : null,
+      : { total: 0, unique: 0, active: 0 },
     !chainId || chainIsIndexed(chainId)
       ? queryClient
           .fetchQuery(
@@ -111,9 +111,9 @@ export const getStaticProps: GetStaticProps<StatefulHomeProps> = async ({
               `Error fetching 30-day stats for chain ${chainId}:`,
               error
             )
-            return null
+            return { total: 0, unique: 0, active: 0 } // Default value
           })
-      : null,
+      : { total: 0, unique: 0, active: 0 },
     !chainId || chainIsIndexed(chainId)
       ? queryClient
           .fetchQuery(
@@ -130,9 +130,9 @@ export const getStaticProps: GetStaticProps<StatefulHomeProps> = async ({
               `Error fetching 7-day stats for chain ${chainId}:`,
               error
             )
-            return null
+            return { total: 0, unique: 0, active: 0 } // Default value
           })
-      : null,
+      : { total: 0, unique: 0, active: 0 },
 
     // Pre-fetch featured DAOs.
     queryClient
