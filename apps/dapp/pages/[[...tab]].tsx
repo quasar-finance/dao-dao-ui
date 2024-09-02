@@ -1,28 +1,27 @@
 // GNU AFFERO GENERAL PUBLIC LICENSE Version 3. Copyright (C) 2022 DAO DAO Contributors.
 // See the "LICENSE" file in the root directory of this package for more copyright information.
 
-import { GetStaticPaths, GetStaticProps } from 'next';
+import { GetStaticPaths, GetStaticProps } from 'next'
 
-import { serverSideTranslations } from '@dao-dao/i18n/serverSideTranslations';
+import { serverSideTranslations } from '@dao-dao/i18n/serverSideTranslations'
 import {
   daoQueries,
   dehydrateSerializable,
   indexerQueries,
   makeReactQueryClient,
-} from '@dao-dao/state';
+} from '@dao-dao/state'
 import {
   Home,
   StatefulHomeProps,
   daoQueries as statefulDaoQueries,
-} from '@dao-dao/stateful';
-import { AccountTabId, DaoDaoIndexerChainStats } from '@dao-dao/types';
+} from '@dao-dao/stateful'
+import { AccountTabId, DaoDaoIndexerChainStats } from '@dao-dao/types'
 import {
   MAINNET,
   chainIsIndexed,
   getDaoInfoForChainId,
   getSupportedChains,
-} from '@dao-dao/utils';
-
+} from '@dao-dao/utils'
 
 export default Home
 
