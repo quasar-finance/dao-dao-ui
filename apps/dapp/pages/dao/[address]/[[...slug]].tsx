@@ -5,12 +5,13 @@ import type { GetStaticPaths, GetStaticProps, NextPage } from 'next'
 import React from 'react'
 
 import {
+  ChainGovernanceDappHome,
   DaoDappHome,
   DaoPageWrapper,
   DaoPageWrapperProps,
 } from '@dao-dao/stateful'
 import { makeGetDaoStaticProps } from '@dao-dao/stateful/server'
-import { DaoPageMode } from '@dao-dao/types'
+import { ContractVersion, DaoPageMode } from '@dao-dao/types'
 import { SITE_URL, getDaoPath } from '@dao-dao/utils'
 
 const DaoHomePage: NextPage<DaoPageWrapperProps> = ({
@@ -18,7 +19,11 @@ const DaoHomePage: NextPage<DaoPageWrapperProps> = ({
   ...props
 }) => (
   <DaoPageWrapper {...props}>
-    <DaoDappHome />
+    {props.info?.coreVersion === ContractVersion.Gov ? (
+      <ChainGovernanceDappHome />
+    ) : (
+      <DaoDappHome />
+    )}
   </DaoPageWrapper>
 )
 
@@ -32,7 +37,7 @@ export const getStaticPaths: GetStaticPaths = () => ({
 
 export const getStaticProps: GetStaticProps = makeGetDaoStaticProps({
   appMode: DaoPageMode.Dapp,
-  getProps: async ({ coreAddress }) => ({
+  getProps: async ({ dao: { coreAddress } }) => ({
     url: SITE_URL + getDaoPath(DaoPageMode.Dapp, coreAddress),
   }),
 })

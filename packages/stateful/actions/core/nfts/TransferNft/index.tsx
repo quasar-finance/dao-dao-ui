@@ -1,7 +1,13 @@
+import JSON5 from 'json5'
 import { useCallback } from 'react'
 import { useFormContext } from 'react-hook-form'
-import { constSelector, useRecoilValue } from 'recoil'
+import { constSelector } from 'recoil'
 
+import {
+  lazyNftCardInfosForDaoSelector,
+  nftCardInfoSelector,
+  walletLazyNftCardInfosSelector,
+} from '@dao-dao/state/recoil'
 import { BoxEmoji, useCachedLoadingWithError } from '@dao-dao/stateless'
 import {
   ActionComponent,
@@ -16,21 +22,16 @@ import {
 } from '@dao-dao/types'
 import {
   combineLoadingDataWithErrors,
+  decodeJsonFromBase64,
   decodePolytoneExecuteMsg,
-  encodeMessageAsBase64,
+  encodeJsonToBase64,
   makeWasmMessage,
   maybeMakePolytoneExecuteMessage,
   objectMatchesStructure,
-  parseEncodedMessage,
 } from '@dao-dao/utils'
 
 import { AddressInput, NftSelectionModal } from '../../../../components'
 import { useWallet } from '../../../../hooks'
-import {
-  lazyNftCardInfosForDaoSelector,
-  nftCardInfoSelector,
-  walletLazyNftCardInfosSelector,
-} from '../../../../recoil/selectors/nft'
 import { useCw721CommonGovernanceTokenInfoIfExists } from '../../../../voting-module-adapter'
 import { useActionOptions } from '../../../react'
 import { TransferNftComponent, TransferNftData } from './Component'
@@ -78,7 +79,7 @@ const useTransformToCosmos: UseTransformToCosmos<TransferNftData> = () => {
                 ? {
                     send_nft: {
                       contract: recipient,
-                      msg: encodeMessageAsBase64(smartContractMsg),
+                      msg: encodeJsonToBase64(JSON5.parse(smartContractMsg)),
                       token_id: tokenId,
                     },
                   }
@@ -157,7 +158,7 @@ const useDecodedCosmosMsg: UseDecodedCosmosMsg<TransferNftData> = (
 
           executeSmartContract: true,
           smartContractMsg: JSON.stringify(
-            parseEncodedMessage(msg.wasm.execute.msg.send_nft.msg),
+            decodeJsonFromBase64(msg.wasm.execute.msg.send_nft.msg, true),
             null,
             2
           ),
@@ -196,7 +197,7 @@ const Component: ActionComponent = (props) => {
           })
       : undefined
   )
-  const nftInfo = useRecoilValue(
+  const nftInfo = useCachedLoadingWithError(
     chainId && collection && tokenId
       ? nftCardInfoSelector({ chainId, collection, tokenId })
       : constSelector(undefined)

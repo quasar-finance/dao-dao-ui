@@ -5,29 +5,32 @@ import { updateProfileNftVisibleAtom } from '@dao-dao/state/recoil'
 import {
   Loader,
   ProfileCantVoteCard,
+  ProfileCreatePermitCard,
   ProfileVoteCard,
   useCachedLoadable,
-  useChain,
-  useDaoInfoContext,
 } from '@dao-dao/stateless'
 import { CheckedDepositInfo } from '@dao-dao/types/contracts/common'
 
-import { useMembership, useWalletInfo } from '../../hooks'
+import {
+  useDaoWithWalletSecretNetworkPermit,
+  useManageProfile,
+  useMembership,
+} from '../../hooks'
 import {
   matchAndLoadCommon,
   useProposalModuleAdapter,
 } from '../../proposal-module-adapter'
 import { useVotingModuleAdapter } from '../../voting-module-adapter'
+import { CreateDaoPermit } from '../dao'
 import { SuspenseLoader } from '../SuspenseLoader'
 
-export interface ProfileProposalCardProps {
-  onVoteSuccess: () => void | Promise<void>
-}
-
 export const ProfileProposalCard = () => {
-  const chain = useChain()
-  const { coreAddress, name: daoName, proposalModules } = useDaoInfoContext()
-  const { walletProfileData, updateProfileName } = useWalletInfo()
+  const { dao, isSecretNetworkPermitNeeded } =
+    useDaoWithWalletSecretNetworkPermit()
+  const {
+    profile,
+    updateProfile: { go: updateProfile },
+  } = useManageProfile()
   const setUpdateProfileNftVisible = useSetRecoilState(
     updateProfileNftVisibleAtom
   )
@@ -44,14 +47,11 @@ export const ProfileProposalCard = () => {
 
   const depositInfoSelectors = useMemo(
     () =>
-      proposalModules.map(
+      dao.proposalModules.map(
         (proposalModule) =>
-          matchAndLoadCommon(proposalModule, {
-            chain,
-            coreAddress,
-          }).selectors.depositInfo
+          matchAndLoadCommon(dao, proposalModule.address).selectors.depositInfo
       ),
-    [chain, coreAddress, proposalModules]
+    [dao]
   )
   const proposalModuleDepositInfosLoadable = useCachedLoadable(
     waitForAll(depositInfoSelectors)
@@ -79,11 +79,18 @@ export const ProfileProposalCard = () => {
 
   // If wallet is a member right now as opposed to when the proposal was open.
   // Relevant for showing them membership join info or not.
-  const { isMember = false } = useMembership({
-    coreAddress,
-  })
+  const { isMember = false } = useMembership()
 
   const loadingWalletVoteInfo = useLoadingWalletVoteInfo()
+
+  if (isSecretNetworkPermitNeeded) {
+    return (
+      <ProfileCreatePermitCard
+        CreatePermit={CreateDaoPermit}
+        profile={profile}
+      />
+    )
+  }
 
   // This card should only display when a wallet is connected. The wallet vote
   // info hook returns undefined when there is no wallet connected. If we are
@@ -98,10 +105,10 @@ export const ProfileProposalCard = () => {
 
   const commonProps = {
     votingPower: votingPowerPercent,
-    daoName,
-    walletProfileData,
+    daoName: dao.name,
+    profile,
     showUpdateProfileNft: () => setUpdateProfileNftVisible(true),
-    updateProfileName,
+    updateProfile,
   }
 
   return couldVote ? (
@@ -128,7 +135,7 @@ export const ProfileProposalCard = () => {
             cantVoteOnProposal
             maxGovernanceTokenDeposit={
               maxGovernanceTokenProposalModuleDeposit > 0
-                ? maxGovernanceTokenProposalModuleDeposit.toString()
+                ? BigInt(maxGovernanceTokenProposalModuleDeposit).toString()
                 : undefined
             }
           />

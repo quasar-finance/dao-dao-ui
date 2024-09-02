@@ -10,7 +10,7 @@ import {
   ActionComponent,
   ActionKey,
   ActionMaker,
-  ProposalModule,
+  IProposalModuleBase,
   UseDecodedCosmosMsg,
   UseDefaults,
   UseTransformToCosmos,
@@ -18,7 +18,7 @@ import {
 import { Threshold } from '@dao-dao/types/contracts/DaoProposalSingle.common'
 import {
   DAO_PROPOSAL_SINGLE_CONTRACT_NAMES,
-  convertDenomToMicroDenomWithDecimals,
+  convertDenomToMicroDenomStringWithDecimals,
   convertDurationToDurationWithUnits,
   convertDurationWithUnitsToDuration,
   convertMicroDenomToDenomWithDecimals,
@@ -115,7 +115,7 @@ const Component: ActionComponent = (props) => {
 export const makeUpdateProposalConfigV1ActionMaker =
   ({
     address: proposalModuleAddress,
-  }: ProposalModule): ActionMaker<UpdateProposalConfigData> =>
+  }: IProposalModuleBase): ActionMaker<UpdateProposalConfigData> =>
   ({ t, address, chain: { chain_id: chainId } }) => {
     const useDefaults: UseDefaults<UpdateProposalConfigData> = () => {
       const proposalModuleConfig = useCachedLoadingWithError(
@@ -226,10 +226,10 @@ export const makeUpdateProposalConfigV1ActionMaker =
                     ...(data.depositInfo &&
                       data.depositRequired && {
                         deposit_info: {
-                          deposit: convertDenomToMicroDenomWithDecimals(
+                          deposit: convertDenomToMicroDenomStringWithDecimals(
                             data.depositInfo.deposit,
                             voteConversionDecimals
-                          ).toString(),
+                          ),
                           refund_failed_proposals:
                             data.depositInfo.refundFailedProposals,
                           token: { voting_module_token: {} },

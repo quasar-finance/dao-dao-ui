@@ -1,43 +1,52 @@
 import { wallets as coin98Wallets } from '@cosmos-kit/coin98'
 import { wallets as compassWallets } from '@cosmos-kit/compass'
-import { Endpoints, SignerOptions } from '@cosmos-kit/core'
+import { Endpoints } from '@cosmos-kit/core'
 import { wallets as cosmosExtensionMetamaskWallets } from '@cosmos-kit/cosmos-extension-metamask'
 import { wallets as cosmostationWallets } from '@cosmos-kit/cosmostation'
 import { wallets as exodusWallets } from '@cosmos-kit/exodus'
 import { wallets as frontierWallets } from '@cosmos-kit/frontier'
+import { wallets as galaxyStationWallets } from '@cosmos-kit/galaxy-station'
 import { wallets as keplrWallets } from '@cosmos-kit/keplr'
 import { wallets as keplrExtensionWallets } from '@cosmos-kit/keplr-extension'
 import { wallets as leapWallets } from '@cosmos-kit/leap'
 import { wallets as leapMetamaskWallets } from '@cosmos-kit/leap-metamask-cosmos-snap'
 import { wallets as ledgerWallets } from '@cosmos-kit/ledger'
+import { wallets as ninjiWallets } from '@cosmos-kit/ninji'
 import { wallets as okxWallets } from '@cosmos-kit/okxwallet'
 import { wallets as omniWallets } from '@cosmos-kit/omni'
+import { wallets as owalletWallets } from '@cosmos-kit/owallet'
 import { ChainProvider } from '@cosmos-kit/react-lite'
 import { wallets as shellWallets } from '@cosmos-kit/shell'
 import { wallets as stationWallets } from '@cosmos-kit/station'
+import { wallets as tailwindWallets } from '@cosmos-kit/tailwind'
 import { wallets as trustWallets } from '@cosmos-kit/trust'
 import { wallets as vectisWallets } from '@cosmos-kit/vectis'
 import { PromptSign, makeWeb3AuthWallets } from '@cosmos-kit/web3auth'
 import { wallets as xdefiWallets } from '@cosmos-kit/xdefi'
-import { assets, chains } from 'chain-registry'
+import { useQueryClient } from '@tanstack/react-query'
 import { PropsWithChildren, ReactNode, useEffect, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { usePrevious } from 'react-use'
 import { useRecoilState, useRecoilValue, useSetRecoilState } from 'recoil'
 
+import { isInIframe } from '@dao-dao/cosmiframe'
+import { makeGetSignerOptions } from '@dao-dao/state'
 import {
   isKeplrMobileWebAtom,
   mountedInBrowserAtom,
   web3AuthPromptAtom,
 } from '@dao-dao/state/recoil'
+import { useUpdatingRef } from '@dao-dao/stateless'
 import {
   CHAIN_ENDPOINTS,
   MAINNET,
   SITE_TITLE,
   SITE_URL,
   WEB3AUTH_CLIENT_ID,
+  assets,
+  chains,
   getChainForChainId,
-  getSignerOptions,
+  getKeplrFromWindow,
 } from '@dao-dao/utils'
 
 import { useSyncWalletSigner, useWallet } from '../../hooks'
@@ -47,6 +56,16 @@ import { WalletUi } from './WalletUi'
 leapMetamaskWallets[0].walletInfo.prettyName = 'MetaMask (Leap Snap)'
 cosmosExtensionMetamaskWallets[0].walletInfo.prettyName =
   'MetaMask (Cosmos Extension)'
+
+const ALLOWED_IFRAME_PARENT_ORIGINS = [
+  'https://daodao.zone',
+  'https://dao.daodao.zone',
+  'https://app.osmosis.zone',
+]
+// Support localhost dev env and vercel preview links.
+if (!ALLOWED_IFRAME_PARENT_ORIGINS.includes(SITE_URL)) {
+  ALLOWED_IFRAME_PARENT_ORIGINS.push(SITE_URL)
+}
 
 export type WalletProviderProps = {
   children: ReactNode
@@ -101,12 +120,7 @@ export const WalletProvider = ({ children }: WalletProviderProps) => {
     [setWeb3AuthPrompt]
   )
 
-  const signerOptions: SignerOptions = {
-    // cosmos-kit has an older version of the package. This is a workaround.
-    signingStargate: getSignerOptions as any,
-    // cosmos-kit has an older version of the package. This is a workaround.
-    signingCosmwasm: getSignerOptions as any,
-  }
+  const getSigningOptions = makeGetSignerOptions(useQueryClient())
 
   // Auto-connect to Keplr mobile web if in that context.
   const mountedInBrowser = useRecoilValue(mountedInBrowserAtom)
@@ -118,42 +132,48 @@ export const WalletProvider = ({ children }: WalletProviderProps) => {
     }
 
     ;(async () => {
-      setIsKeplrMobileWeb(
-        (await (await import('@keplr-wallet/stores')).getKeplrFromWindow())
-          ?.mode === 'mobile-web'
-      )
+      setIsKeplrMobileWeb((await getKeplrFromWindow())?.mode === 'mobile-web')
     })()
   }, [mountedInBrowser, setIsKeplrMobileWeb])
 
-  const allWallets = [
-    ...leapMetamaskWallets,
-    // Alphabetize.
-    ...[
-      ...keplrWallets,
-      ...leapWallets.filter((w) => !leapMetamaskWallets.includes(w)),
-      ...stationWallets,
-      ...vectisWallets,
-      ...trustWallets,
-      ...cosmostationWallets,
-      ...coin98Wallets,
-      ...omniWallets,
-      ...shellWallets,
-      ...xdefiWallets,
-      ...okxWallets,
-      ...compassWallets,
-      ...frontierWallets,
-      ...cosmosExtensionMetamaskWallets,
-      ...exodusWallets,
-      ...ledgerWallets,
-    ].sort((a, b) =>
-      a.walletInfo.prettyName.localeCompare(b.walletInfo.prettyName)
-    ),
-    // Google, Apple, Discord, Twitter
-    ...web3AuthWallets,
-  ]
+  // If in iframe, show no wallets, which will make it only show the iframe
+  // wallet since that's installed by default.
+  const allWallets = isInIframe()
+    ? []
+    : [
+        ...leapMetamaskWallets,
+        // Alphabetize.
+        ...[
+          ...keplrWallets,
+          ...leapWallets.filter((w) => !leapMetamaskWallets.includes(w)),
+          ...stationWallets,
+          ...galaxyStationWallets,
+          ...vectisWallets,
+          ...trustWallets,
+          ...cosmostationWallets,
+          ...coin98Wallets,
+          ...omniWallets,
+          ...shellWallets,
+          ...xdefiWallets,
+          ...okxWallets,
+          ...compassWallets,
+          ...frontierWallets,
+          ...cosmosExtensionMetamaskWallets,
+          ...exodusWallets,
+          ...ledgerWallets,
+          ...tailwindWallets,
+          ...ninjiWallets,
+          ...owalletWallets,
+        ].sort((a, b) =>
+          a.walletInfo.prettyName.localeCompare(b.walletInfo.prettyName)
+        ),
+        // Google, Apple, Discord, Twitter
+        ...web3AuthWallets,
+      ]
 
   return (
     <ChainProvider
+      allowedIframeParentOrigins={ALLOWED_IFRAME_PARENT_ORIGINS}
       assetLists={assets}
       chains={chains}
       endpointOptions={{
@@ -170,7 +190,10 @@ export const WalletProvider = ({ children }: WalletProviderProps) => {
           {} as Record<string, Endpoints>
         ),
       }}
-      signerOptions={signerOptions}
+      signerOptions={{
+        signingStargate: getSigningOptions,
+        signingCosmwasm: getSigningOptions,
+      }}
       walletConnectOptions={{
         signClient: {
           // https://cloud.walletconnect.com
@@ -206,8 +229,7 @@ const InnerWalletProvider = ({ children }: PropsWithChildren<{}>) => {
   const previousChain = usePrevious(chain.chain_name)
   const previousConnected = usePrevious(isWalletConnected)
   const previousWalletName = usePrevious(wallet?.name)
-  const walletRepoRef = useRef(walletRepo)
-  walletRepoRef.current = walletRepo
+  const walletRepoRef = useUpdatingRef(walletRepo)
   const reconnectingRef = useRef(false)
   useEffect(() => {
     if (
@@ -219,7 +241,7 @@ const InnerWalletProvider = ({ children }: PropsWithChildren<{}>) => {
     ) {
       reconnectingRef.current = true
       walletRepoRef.current
-        .connect(previousWalletName)
+        .connect(previousWalletName, false)
         .catch(console.error)
         .finally(() => {
           reconnectingRef.current = false
@@ -231,6 +253,7 @@ const InnerWalletProvider = ({ children }: PropsWithChildren<{}>) => {
     previousChain,
     chain.chain_name,
     previousWalletName,
+    walletRepoRef,
   ])
 
   // Refresh connection on wallet change.
@@ -242,7 +265,7 @@ const InnerWalletProvider = ({ children }: PropsWithChildren<{}>) => {
     const refresh = async () => {
       // Ensure connection still alive, and disconnect on failure.
       try {
-        await walletRepo.connect(wallet.name)
+        await walletRepo.connect(wallet.name, false)
       } catch {
         await walletRepo.disconnect(wallet.name, true).catch(console.error)
       }
@@ -267,7 +290,7 @@ const InnerWalletProvider = ({ children }: PropsWithChildren<{}>) => {
       return
     }
 
-    walletRepo.connect(keplrExtensionWallets[0].walletName)
+    walletRepo.connect(keplrExtensionWallets[0].walletName, false)
   }, [isKeplrMobileWeb, isWalletDisconnected, walletRepo])
 
   return <>{children}</>

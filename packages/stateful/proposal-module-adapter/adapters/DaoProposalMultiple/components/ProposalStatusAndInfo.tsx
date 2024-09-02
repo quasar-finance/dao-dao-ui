@@ -8,7 +8,7 @@ import {
   Tag,
 } from '@mui/icons-material'
 import clsx from 'clsx'
-import { ComponentProps, ComponentType, useCallback, useEffect } from 'react'
+import { ComponentProps, ComponentType, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import TimeAgo from 'react-timeago'
 import { useRecoilValue } from 'recoil'
@@ -24,6 +24,7 @@ import {
   TooltipTruncatedText,
   useConfiguredChainContext,
   useDaoInfoContext,
+  useExecuteAt,
   useTranslatedTimeDeltaFormatter,
 } from '@dao-dao/stateless'
 import {
@@ -32,7 +33,6 @@ import {
   DepositRefundPolicy,
   ProposalStatusEnum,
 } from '@dao-dao/types'
-import { MultipleChoiceVote } from '@dao-dao/types/contracts/DaoProposalMultiple'
 import {
   formatDateTimeTz,
   formatPercentOf100,
@@ -42,12 +42,10 @@ import {
 import { EntityDisplay, SuspenseLoader } from '../../../../components'
 import { ButtonLink } from '../../../../components/ButtonLink'
 import {
-  DaoProposalMultipleHooks,
   useAwaitNextBlock,
   useProposalActionState,
-  useProposalPolytoneState,
+  useProposalRelayState,
   useProposalVetoState,
-  useWallet,
 } from '../../../../hooks'
 import { useProposalModuleAdapterOptions } from '../../../react'
 import {
@@ -113,7 +111,6 @@ const InnerProposalStatusAndInfo = ({
   } = useConfiguredChainContext()
   const { coreAddress } = useDaoInfoContext()
   const { proposalModule, proposalNumber } = useProposalModuleAdapterOptions()
-  const { address: walletAddress = '' } = useWallet()
 
   const config = useRecoilValue(
     DaoProposalMultipleSelectors.configSelector({
@@ -128,16 +125,7 @@ const InnerProposalStatusAndInfo = ({
 
   const statusKey = getProposalStatusKey(proposal.status)
 
-  const executeProposal = DaoProposalMultipleHooks.useExecute({
-    contractAddress: proposalModule.address,
-    sender: walletAddress,
-  })
-  const closeProposal = DaoProposalMultipleHooks.useClose({
-    contractAddress: proposalModule.address,
-    sender: walletAddress,
-  })
-
-  const polytoneState = useProposalPolytoneState({
+  const relayState = useProposalRelayState({
     msgs: winningChoice?.msgs || [],
     status: proposal.status,
     executedAt: proposal.executedAt,
@@ -148,30 +136,17 @@ const InnerProposalStatusAndInfo = ({
   })
   const { action, footer } = useProposalActionState({
     statusKey,
-    polytoneState,
+    relayState,
     loadingExecutionTxHash,
-    executeProposal,
-    closeProposal,
     onExecuteSuccess,
     onCloseSuccess,
   })
 
   const awaitNextBlock = useAwaitNextBlock()
-  // Refresh proposal and list of proposals (for list status) once voting ends.
-  useEffect(() => {
-    if (
-      statusKey !== ProposalStatusEnum.Open ||
-      !timestampInfo?.expirationDate
-    ) {
-      return
-    }
-
-    const msRemaining = timestampInfo?.expirationDate.getTime() - Date.now()
-    if (msRemaining < 0) {
-      return
-    }
-
-    const timeout = setTimeout(() => {
+  // Refresh proposal and list of proposals (for list status) once voting or
+  // veto period ends.
+  useExecuteAt({
+    fn: () => {
       // Refresh immediately so that the timestamp countdown re-renders and
       // hides itself.
       refreshProposal()
@@ -179,15 +154,14 @@ const InnerProposalStatusAndInfo = ({
       // and refresh the list of all proposals so the status gets updated there
       // as well.
       awaitNextBlock().then(refreshProposalAndAll)
-    }, msRemaining)
-    return () => clearTimeout(timeout)
-  }, [
-    timestampInfo?.expirationDate,
-    statusKey,
-    refreshProposal,
-    refreshProposalAndAll,
-    awaitNextBlock,
-  ])
+    },
+    date:
+      statusKey === ProposalStatusEnum.Open
+        ? timestampInfo.expirationDate
+        : statusKey === 'veto_timelock'
+        ? vetoTimelockExpiration
+        : undefined,
+  })
 
   const { vetoEnabled, canBeVetoed, vetoOrEarlyExecute, vetoInfoItems } =
     useProposalVetoState({
@@ -199,7 +173,7 @@ const InnerProposalStatusAndInfo = ({
 
   const timeAgoFormatter = useTranslatedTimeDeltaFormatter({ words: false })
 
-  const info: ProposalStatusAndInfoProps<MultipleChoiceVote>['info'] = [
+  const info: ProposalStatusAndInfoProps['info'] = [
     {
       Icon: (props) => <Logo {...props} />,
       label: t('title.dao'),
@@ -229,18 +203,20 @@ const InnerProposalStatusAndInfo = ({
             label: t('title.revoting'),
             Value: (props) => <p {...props}>{t('info.enabled')}</p>,
           },
-        ] as ProposalStatusAndInfoProps<MultipleChoiceVote>['info'])
+        ] as ProposalStatusAndInfoProps['info'])
       : []),
-    ...(timestampInfo?.display
+    ...(timestampInfo.display
       ? ([
           {
             Icon: HourglassTopRounded,
             label: timestampInfo.display.label,
             Value: (props) => (
-              <p {...props}>{timestampInfo.display!.content}</p>
+              <Tooltip title={timestampInfo.display!.tooltip}>
+                <p {...props}>{timestampInfo.display!.content}</p>
+              </Tooltip>
             ),
           },
-        ] as ProposalStatusAndInfoProps<MultipleChoiceVote>['info'])
+        ] as ProposalStatusAndInfoProps['info'])
       : []),
     ...(vetoTimelockExpiration
       ? ([
@@ -258,7 +234,7 @@ const InnerProposalStatusAndInfo = ({
               </Tooltip>
             ),
           },
-        ] as ProposalStatusAndInfoProps<MultipleChoiceVote>['info'])
+        ] as ProposalStatusAndInfoProps['info'])
       : []),
     ...(loadingExecutionTxHash.loading || loadingExecutionTxHash.data
       ? ([
@@ -291,7 +267,7 @@ const InnerProposalStatusAndInfo = ({
                 </div>
               ) : null,
           },
-        ] as ProposalStatusAndInfoProps<MultipleChoiceVote>['info'])
+        ] as ProposalStatusAndInfoProps['info'])
       : []),
     ...(winningChoice &&
     (statusKey === ProposalStatusEnum.Passed ||
@@ -307,7 +283,7 @@ const InnerProposalStatusAndInfo = ({
               <TooltipTruncatedText {...props} text={winningChoice.title} />
             ),
           },
-        ] as ProposalStatusAndInfoProps<MultipleChoiceVote>['info'])
+        ] as ProposalStatusAndInfoProps['info'])
       : []),
   ]
 
@@ -422,7 +398,7 @@ const InnerProposalStatusAndInfoLoader = (
   const LoaderP: ComponentType<{ className: string }> = ({ className }) => (
     <p className={clsx('animate-pulse', className)}>...</p>
   )
-  const info: ProposalStatusAndInfoProps<MultipleChoiceVote>['info'] = [
+  const info: ProposalStatusAndInfoProps['info'] = [
     {
       Icon: (props) => <Logo {...props} />,
       label: t('title.dao'),

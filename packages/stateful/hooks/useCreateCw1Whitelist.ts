@@ -1,7 +1,8 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useState } from 'react'
 import toast from 'react-hot-toast'
 import { useTranslation } from 'react-i18next'
 
+import { useUpdatingRef } from '@dao-dao/stateless'
 import { CreateCw1Whitelist } from '@dao-dao/types'
 import { InstantiateMsg as Cw1WhitelistInstantiateMsg } from '@dao-dao/types/contracts/Cw1Whitelist'
 import {
@@ -44,7 +45,7 @@ export const useCreateCw1Whitelist = ({
   const { t } = useTranslation()
   const {
     address: walletAddress,
-    getSigningCosmWasmClient,
+    getSigningClient,
     chain: { chain_id: chainId, bech32_prefix: bech32Prefix },
   } = useWallet({
     chainId: _chainId,
@@ -53,8 +54,7 @@ export const useCreateCw1Whitelist = ({
     getSupportedChainConfig(chainId)?.codeIds?.Cw1Whitelist ?? -1
   const [creatingCw1Whitelist, setCreatingCw1Whitelist] = useState(false)
 
-  const validationRef = useRef(validation)
-  validationRef.current = validation
+  const validationRef = useUpdatingRef(validation)
   const createCw1Whitelist: CreateCw1Whitelist = useCallback(
     async (admins: string[], mutable = false) => {
       try {
@@ -77,7 +77,7 @@ export const useCreateCw1Whitelist = ({
         }
 
         const contractAddress = await instantiateSmartContract(
-          await getSigningCosmWasmClient(),
+          getSigningClient,
           walletAddress,
           cw1WhitelistCodeId,
           contractLabel,
@@ -103,8 +103,9 @@ export const useCreateCw1Whitelist = ({
       bech32Prefix,
       contractLabel,
       cw1WhitelistCodeId,
-      getSigningCosmWasmClient,
+      getSigningClient,
       t,
+      validationRef,
       walletAddress,
     ]
   )

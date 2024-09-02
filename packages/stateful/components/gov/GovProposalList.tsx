@@ -1,17 +1,26 @@
 import { useRouter } from 'next/router'
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useSetRecoilState } from 'recoil'
 
-import { govProposalsSelector } from '@dao-dao/state/recoil'
+import {
+  govProposalsSelector,
+  refreshGovProposalsAtom,
+  searchedDecodedGovProposalsSelector,
+} from '@dao-dao/state/recoil'
 import {
   ProposalList as StatelessProposalList,
   useCachedLoading,
+  useCachedLoadingWithError,
   useChain,
 } from '@dao-dao/stateless'
-import { ProposalStatus } from '@dao-dao/utils/protobuf/codegen/cosmos/gov/v1beta1/gov'
+import { StatefulGovProposalLineProps } from '@dao-dao/types'
+import { ProposalStatus } from '@dao-dao/types/protobuf/codegen/cosmos/gov/v1beta1/gov'
+import { chainIsIndexed, getDisplayNameForChainId } from '@dao-dao/utils'
 
+import { useOnCurrentDaoWebSocketMessage } from '../../hooks/useWebSocket'
 import { LinkWrapper } from '../LinkWrapper'
-import { GovProposalLine, GovProposalLineProps } from './GovProposalLine'
+import { GovProposalLine } from './GovProposalLine'
 
 const PROPSALS_PER_PAGE = 20
 
@@ -19,6 +28,15 @@ export const GovProposalList = () => {
   const { t } = useTranslation()
   const chain = useChain()
   const { asPath } = useRouter()
+  const hasIndexer = chainIsIndexed(chain.chain_id)
+
+  // Refresh all proposals on proposal WebSocket messages.
+  const setRefreshGovProposalsId = useSetRecoilState(
+    refreshGovProposalsAtom(chain.chain_id)
+  )
+  useOnCurrentDaoWebSocketMessage('proposal', () =>
+    setRefreshGovProposalsId((id) => id + 1)
+  )
 
   const openGovProposalsVotingPeriod = useCachedLoading(
     govProposalsSelector({
@@ -85,7 +103,7 @@ export const GovProposalList = () => {
   }, [loadingAllGovProposals, maxPage])
 
   const [historyProposals, setHistoryProposals] = useState<
-    GovProposalLineProps[]
+    StatefulGovProposalLineProps[]
   >([])
 
   useEffect(() => {
@@ -101,7 +119,7 @@ export const GovProposalList = () => {
           prop.proposal.status === ProposalStatus.PROPOSAL_STATUS_FAILED
       )
       .map(
-        (proposal): GovProposalLineProps => ({
+        (proposal): StatefulGovProposalLineProps => ({
           proposalId: proposal.id.toString(),
           proposal,
         })
@@ -122,7 +140,7 @@ export const GovProposalList = () => {
     ? []
     : openGovProposalsVotingPeriod.data.proposals
         .map(
-          (proposal): GovProposalLineProps => ({
+          (proposal): StatefulGovProposalLineProps => ({
             proposalId: proposal.id.toString(),
             proposal,
           })
@@ -137,7 +155,7 @@ export const GovProposalList = () => {
     ? []
     : govProposalsDepositPeriod.data.proposals
         .map(
-          (proposal): GovProposalLineProps => ({
+          (proposal): StatefulGovProposalLineProps => ({
             proposalId: proposal.id.toString(),
             proposal,
           })
@@ -148,39 +166,86 @@ export const GovProposalList = () => {
             (a.proposal.proposal.depositEndTime ?? new Date(0)).getTime()
         )
 
-  const historyCount = loadingAllGovProposals.loading
-    ? 0
-    : loadingAllGovProposals.data.total - openProposals.length
+  const historyCount =
+    loadingAllGovProposals.loading ||
+    openGovProposalsVotingPeriod.loading ||
+    govProposalsDepositPeriod.loading
+      ? 0
+      : loadingAllGovProposals.data.total -
+        openGovProposalsVotingPeriod.data.proposals.length -
+        govProposalsDepositPeriod.data.proposals.length
+
+  const [search, setSearch] = useState('')
+  const showingSearchResults = hasIndexer && !!search && search.length > 0
+  const searchedGovProposals = useCachedLoadingWithError(
+    showingSearchResults
+      ? searchedDecodedGovProposalsSelector({
+          chainId: chain.chain_id,
+          query: search,
+          limit: 20,
+        })
+      : undefined
+  )
 
   return (
     <StatelessProposalList
       DiscordNotifierConfigureModal={undefined}
       LinkWrapper={LinkWrapper}
       ProposalLine={GovProposalLine}
-      canLoadMore={page < maxPage}
+      canLoadMore={!showingSearchResults && page < maxPage}
       createNewProposalHref={asPath + '/create'}
+      daoName={getDisplayNameForChainId(chain.chain_id)}
       daosWithVetoableProposals={[]}
       isMember={true}
       loadMore={goToNextPage}
       loadingMore={
-        openGovProposalsVotingPeriod.loading ||
-        govProposalsDepositPeriod.loading ||
-        loadingAllGovProposals.loading ||
-        !!loadingAllGovProposals.updating
+        showingSearchResults
+          ? searchedGovProposals.loading || !!searchedGovProposals.updating
+          : openGovProposalsVotingPeriod.loading ||
+            govProposalsDepositPeriod.loading ||
+            loadingAllGovProposals.loading ||
+            !!loadingAllGovProposals.updating
       }
-      openProposals={openProposals}
-      sections={[
-        {
-          title: t('title.depositPeriod'),
-          proposals: depositPeriodProposals,
-          defaultCollapsed: true,
-        },
-        {
-          title: t('title.history'),
-          proposals: historyProposals,
-          total: historyCount,
-        },
-      ]}
+      openProposals={showingSearchResults ? [] : openProposals}
+      searchBarProps={
+        // Cannot search without an indexer on the chain.
+        hasIndexer
+          ? {
+              value: search,
+              onChange: (e) => setSearch(e.target.value),
+            }
+          : undefined
+      }
+      sections={
+        showingSearchResults
+          ? [
+              {
+                title: t('title.results'),
+                proposals:
+                  searchedGovProposals.loading || searchedGovProposals.errored
+                    ? []
+                    : searchedGovProposals.data.proposals.map(
+                        (proposal): StatefulGovProposalLineProps => ({
+                          proposalId: proposal.id.toString(),
+                          proposal,
+                        })
+                      ),
+              },
+            ]
+          : [
+              {
+                title: t('title.depositPeriod'),
+                proposals: depositPeriodProposals,
+                defaultCollapsed: true,
+              },
+              {
+                title: t('title.history'),
+                proposals: historyProposals,
+                total: historyCount,
+              },
+            ]
+      }
+      showingSearchResults={showingSearchResults}
     />
   )
 }

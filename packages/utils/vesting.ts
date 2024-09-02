@@ -1,9 +1,7 @@
-import { ValidatorSlash } from '@dao-dao/state/recoil'
 import {
   CwVestingStakeEvent,
   CwVestingStakeHistory,
-} from '@dao-dao/state/recoil/selectors/contracts/CwVesting'
-import {
+  ValidatorSlash,
   VestingValidatorSlash,
   VestingValidatorWithSlashes,
 } from '@dao-dao/types'
@@ -131,7 +129,7 @@ export const getVestingValidatorSlashes = (
               registration.validator === validatorOperatorAddress &&
               registration.time ===
                 // milliseconds to nanoseconds
-                (Number(slash.registeredBlockTimeUnixMs) * 1e6).toString()
+                BigInt(Number(slash.registeredBlockTimeUnixMs) * 1e6).toString()
           ) ?? []
         const registeredStaked = registeredSlashes.reduce(
           (acc, slash) =>

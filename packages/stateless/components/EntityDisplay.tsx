@@ -1,5 +1,4 @@
 /* eslint-disable i18next/no-literal-string */
-import { fromBech32 } from '@cosmjs/encoding'
 import { Check, CopyAllOutlined } from '@mui/icons-material'
 import clsx from 'clsx'
 import { useEffect, useState } from 'react'
@@ -7,12 +6,13 @@ import { useTranslation } from 'react-i18next'
 
 import { EntityDisplayProps, EntityType } from '@dao-dao/types'
 import {
-  concatAddressStartEnd,
+  abbreviateAddress,
   getFallbackImage,
   toAccessibleImageUrl,
 } from '@dao-dao/utils'
 
-import { useChainContext, useDaoNavHelpers, useDetectTruncate } from '../hooks'
+import { useChainContext } from '../contexts'
+import { useDaoNavHelpers, useDetectTruncate } from '../hooks'
 import { ButtonLink } from './buttons'
 import { IconButton } from './icon_buttons'
 import { Tooltip } from './tooltip/Tooltip'
@@ -58,15 +58,6 @@ export const EntityDisplay = ({
 
   const { textRef, truncated } = useDetectTruncate()
 
-  // Use bech32 prefix length to determine how much to truncate from beginning.
-  let prefixLength
-  try {
-    prefixLength = fromBech32(address).prefix.length
-  } catch (e) {
-    // Conservative estimate.
-    prefixLength = 6
-  }
-
   // If name exists, use it. Otherwise, fallback to address, potentially
   // truncated.
   const textDisplay =
@@ -77,7 +68,7 @@ export const EntityDisplay = ({
         : loadingEntity.data.name
       : showFullAddress
       ? address
-      : concatAddressStartEnd(address, prefixLength + 3, 3)
+      : abbreviateAddress(address, 3)
 
   return (
     <div
@@ -95,6 +86,7 @@ export const EntityDisplay = ({
           href={noLink ? undefined : href}
           onClick={(e) => !noLink && e.stopPropagation()}
           openInNewTab={openInNewTab}
+          prefetch
           variant={noUnderline || noLink || !href ? 'none' : 'underline'}
         >
           {!hideImage && (

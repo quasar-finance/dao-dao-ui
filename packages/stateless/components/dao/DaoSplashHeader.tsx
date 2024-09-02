@@ -12,13 +12,14 @@ export const DaoSplashHeader = ({
   ButtonLink,
   LinkWrapper,
   parentProposalRecognizeSubDaoHref,
+  proposeUpdateAdminToParentHref,
 }: DaoSplashHeaderProps) => {
   const { t } = useTranslation()
 
   return (
     <>
       {!daoInfo.isActive && daoInfo.activeThreshold && (
-        <div className="mb-2 flex flex-row items-center justify-center gap-3 rounded-md bg-background-interactive-warning p-3 md:gap-2">
+        <div className="mb-10 -mt-4 flex flex-row items-center justify-center gap-3 rounded-md bg-background-interactive-warning p-3 md:gap-2">
           <WarningRounded className="!h-10 !w-10 text-icon-interactive-warning md:!h-6 md:!w-6" />
 
           <p className="text-text-interactive-warning-body">
@@ -45,7 +46,7 @@ export const DaoSplashHeader = ({
       {daoInfo.parentDao && !daoInfo.parentDao.registeredSubDao && (
         <ButtonLink
           center
-          className="mb-4 bg-background-interactive-warning"
+          className="mb-10 -mt-4 bg-background-interactive-warning"
           contentContainerClassName="p-3 !gap-4 md:!gap-3 text-center"
           href={parentProposalRecognizeSubDaoHref}
           size="none"
@@ -62,6 +63,35 @@ export const DaoSplashHeader = ({
             {!!parentProposalRecognizeSubDaoHref && (
               <span className="font-bold">
                 {' ' + t('button.clickHereToProposeRecognizingIt')}
+              </span>
+            )}
+          </p>
+        </ButtonLink>
+      )}
+
+      {daoInfo.parentDao && daoInfo.contractAdmin === daoInfo.coreAddress && (
+        <ButtonLink
+          center
+          className="mb-10 -mt-4 bg-background-interactive-warning"
+          contentContainerClassName="p-3 !gap-4 md:!gap-3 text-center"
+          href={proposeUpdateAdminToParentHref}
+          size="none"
+          variant="none"
+        >
+          <WarningRounded className="!h-14 !w-14 text-icon-interactive-warning md:!h-10 md:!w-10" />
+
+          <p className="text-text-interactive-warning-body">
+            {t('info.parentDaoNotAdmin', {
+              parent: daoInfo.parentDao.name,
+              child: daoInfo.name,
+            })}
+
+            {!!proposeUpdateAdminToParentHref && (
+              <span className="font-bold">
+                {' ' +
+                  t('button.clickHereToProposeSettingAdminToParent', {
+                    parent: daoInfo.parentDao.name,
+                  })}
               </span>
             )}
           </p>

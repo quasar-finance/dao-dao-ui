@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 
-import { BallotDepositEmoji, useDaoInfoContext } from '@dao-dao/stateless'
+import { BallotDepositEmoji, useDaoContext } from '@dao-dao/stateless'
 import {
   ActionComponent,
   ActionContextType,
@@ -22,16 +22,16 @@ import {
 
 const useUpdateProposalConfigActions = (): ProposalModuleWithAction[] => {
   const options = useActionOptions()
-  const { coreAddress, proposalModules } = useDaoInfoContext()
+  const { dao } = useDaoContext()
 
   const proposalModuleActions = useMemo(
     () =>
-      proposalModules.flatMap(
-        (proposalModule): ProposalModuleWithAction | [] => {
-          const action = matchAndLoadCommon(proposalModule, {
-            chain: options.chain,
-            coreAddress,
-          }).fields.updateConfigActionMaker(options)
+      dao.info.proposalModules
+        .flatMap((proposalModule): ProposalModuleWithAction | [] => {
+          const action = matchAndLoadCommon(
+            dao,
+            proposalModule.address
+          ).fields.updateConfigActionMaker(options)
 
           return action
             ? {
@@ -39,9 +39,12 @@ const useUpdateProposalConfigActions = (): ProposalModuleWithAction[] => {
                 action,
               }
             : []
-        }
-      ),
-    [coreAddress, options, proposalModules]
+        })
+        // Sort proposal modules by prefix.
+        .sort((a, b) =>
+          a.proposalModule.prefix.localeCompare(b.proposalModule.prefix)
+        ),
+    [dao, options]
   )
 
   return proposalModuleActions

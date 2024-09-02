@@ -27,7 +27,7 @@ export const InstantiateNftCollection: ActionComponent = (props) => {
 
   const [instantiating, setInstantiating] = useState(false)
 
-  const { address: walletAddress, getSigningCosmWasmClient } = useWallet({
+  const { address: walletAddress, getSigningClient } = useWallet({
     chainId,
   })
 
@@ -52,9 +52,8 @@ export const InstantiateNftCollection: ActionComponent = (props) => {
 
     setInstantiating(true)
     try {
-      const signingCosmWasmClient = await getSigningCosmWasmClient()
       const contractAddress = await instantiateSmartContract(
-        signingCosmWasmClient,
+        getSigningClient,
         walletAddress,
         codeIds.Cw721Base,
         instantiateData.name,
@@ -62,7 +61,9 @@ export const InstantiateNftCollection: ActionComponent = (props) => {
           minter,
           name: instantiateData.name,
           symbol: instantiateData.symbol,
-        }
+        },
+        undefined,
+        minter
       )
 
       // Update action form data with address.

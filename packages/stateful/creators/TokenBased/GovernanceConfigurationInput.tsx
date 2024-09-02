@@ -27,6 +27,7 @@ import {
   useSupportedChainContext,
 } from '@dao-dao/stateless'
 import {
+  ChainId,
   CreateDaoCustomValidator,
   DaoCreationGovernanceConfigInputProps,
   TokenType,
@@ -35,7 +36,7 @@ import { TokenInfoResponse } from '@dao-dao/types/contracts/Cw20Base'
 import {
   DISTRIBUTION_COLORS,
   NEW_DAO_TOKEN_DECIMALS,
-  convertDenomToMicroDenomWithDecimals,
+  convertMicroDenomToDenomWithDecimals,
   formatPercentOf100,
   isValidBech32Address,
   isValidNativeTokenDenom,
@@ -74,9 +75,9 @@ export const GovernanceConfigurationInput = ({
 
   const {
     chain: { chain_id: chainId, bech32_prefix: bech32Prefix },
-    config: { createWithCw20 },
+    config,
   } = useSupportedChainContext()
-  const isCw20 = !!createWithCw20
+  const isCw20 = !!config.createWithCw20
 
   const {
     fields: tierFields,
@@ -89,13 +90,13 @@ export const GovernanceConfigurationInput = ({
 
   const addTierRef = useRef<HTMLButtonElement>(null)
   const addTier = useCallback(() => {
-    appendTier(cloneDeep(TokenBasedCreator.defaultConfig.tiers[0]))
+    appendTier(cloneDeep(TokenBasedCreator.makeDefaultConfig(config).tiers[0]))
     // Scroll button to bottom of screen.
     addTierRef.current?.scrollIntoView({
       behavior: 'smooth',
       block: 'end',
     })
-  }, [appendTier])
+  }, [appendTier, config])
 
   // Load token factory denom creation fee.
   const tokenFactoryDenomCreationFeeLoading = useCachedLoading(
@@ -253,7 +254,7 @@ export const GovernanceConfigurationInput = ({
       'creator.data.existingTokenSupply',
       existingGovernanceTokenSupply.state === 'hasValue'
         ? typeof existingGovernanceTokenSupply.contents === 'number'
-          ? existingGovernanceTokenSupply.contents.toString()
+          ? BigInt(existingGovernanceTokenSupply.contents).toString()
           : existingGovernanceTokenSupply.contents?.total_supply
         : undefined
     )
@@ -329,6 +330,13 @@ export const GovernanceConfigurationInput = ({
           {
             label: t('button.createAToken'),
             value: GovernanceTokenType.New,
+            disabled:
+              config.tokenCreationUnderDevelopment || config.noTokenFactory,
+            tooltip: config.tokenCreationUnderDevelopment
+              ? t('info.tokenCreationUnderDevelopment')
+              : config.noTokenFactory
+              ? t('info.tokenCreationNoTokenFactory')
+              : undefined,
           },
           {
             label: t('button.useExistingToken'),
@@ -402,9 +410,61 @@ export const GovernanceConfigurationInput = ({
               </div>
             </div>
 
-            <div className="flex flex-row items-center gap-6 border-y border-border-secondary py-7 px-6">
+            {/* Max token supply for BitSong fantokens */}
+            {(chainId === ChainId.BitsongMainnet ||
+              chainId === ChainId.BitsongTestnet) && (
+              <div className="flex flex-col gap-6 border-t border-border-secondary py-7 px-6">
+                <div className="flex flex-row items-center gap-6">
+                  <p className="primary-text text-text-body">
+                    {t('form.maxTokenSupply')}
+                  </p>
+
+                  <div className="flex grow flex-col">
+                    <div className="flex grow flex-row items-center gap-2">
+                      <NumberInput
+                        className="symbol-small-body-text font-mono leading-5 text-text-secondary"
+                        containerClassName="grow"
+                        error={errors.creator?.data?.newInfo?.maxSupply}
+                        fieldName="creator.data.newInfo.maxSupply"
+                        ghost
+                        min={data.newInfo.initialSupply}
+                        register={register}
+                        step={convertMicroDenomToDenomWithDecimals(
+                          1,
+                          NEW_DAO_TOKEN_DECIMALS
+                        )}
+                        validation={[
+                          validatePositive,
+                          validateRequired,
+                          (maxSupply) =>
+                            (typeof maxSupply === 'number' &&
+                              maxSupply >= data.newInfo.initialSupply) ||
+                            t('error.maxSupplyMustBeAtLeastInitialSupply'),
+                        ]}
+                      />
+                      <p className="symbol-small-body-text font-mono leading-5 text-text-tertiary">
+                        $
+                        {data.newInfo.symbol.trim() ||
+                          t('info.token').toLocaleUpperCase()}
+                      </p>
+                    </div>
+
+                    <InputErrorMessage
+                      className="self-end"
+                      error={errors.creator?.data?.newInfo?.maxSupply}
+                    />
+                  </div>
+                </div>
+
+                <p className="secondary-text">
+                  {t('info.maxTokenSupplyDescription')}
+                </p>
+              </div>
+            )}
+
+            <div className="flex flex-row items-center gap-6 border-t border-border-secondary py-7 px-6">
               <p className="primary-text text-text-body">
-                {t('form.initialSupply')}
+                {t('form.initialTokenSupply')}
               </p>
 
               <div className="flex grow flex-col">
@@ -416,7 +476,7 @@ export const GovernanceConfigurationInput = ({
                     fieldName="creator.data.newInfo.initialSupply"
                     ghost
                     register={register}
-                    step={convertDenomToMicroDenomWithDecimals(
+                    step={convertMicroDenomToDenomWithDecimals(
                       1,
                       NEW_DAO_TOKEN_DECIMALS
                     )}
@@ -436,7 +496,7 @@ export const GovernanceConfigurationInput = ({
               </div>
             </div>
 
-            <div className="flex flex-col gap-6 py-7 px-6">
+            <div className="flex flex-col gap-6 py-7 px-6 border-t border-border-secondary">
               <div className="flex flex-row items-center gap-6">
                 <p className="primary-text text-text-body">
                   {t('info.treasuryPercent')}
@@ -558,9 +618,7 @@ export const GovernanceConfigurationInput = ({
                 fieldName="creator.data.existingTokenDenomOrAddress"
                 ghost
                 placeholder={
-                  isCw20
-                    ? bech32Prefix + '...'
-                    : `"denom" OR "ibc/HASH" OR "factory/${bech32Prefix}.../denom"`
+                  isCw20 ? bech32Prefix + '...' : `denom OR ibc/HASH`
                 }
                 register={register}
                 validation={[
@@ -580,13 +638,14 @@ export const GovernanceConfigurationInput = ({
 
             {existingGovernanceTokenLoadable.state === 'loading' ? (
               <Loader />
+            ) : existingGovernanceTokenLoadable.state === 'hasValue' ? (
+              <p className="primary-text text-text-interactive-valid">
+                ${existingGovernanceTokenLoadable.valueMaybe()?.symbol}
+              </p>
             ) : (
-              existingGovernanceTokenLoadable.state === 'hasValue' &&
-              !!existingGovernanceTokenLoadable.contents && (
-                <p className="primary-text text-text-interactive-valid">
-                  ${existingGovernanceTokenLoadable.contents?.symbol}
-                </p>
-              )
+              <InputErrorMessage
+                error={existingGovernanceTokenLoadable.errorMaybe()}
+              />
             )}
           </div>
         </div>

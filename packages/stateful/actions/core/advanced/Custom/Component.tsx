@@ -1,5 +1,4 @@
 import { Check, Close } from '@mui/icons-material'
-import JSON5 from 'json5'
 import { useMemo } from 'react'
 import { useFormContext } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
@@ -9,14 +8,12 @@ import {
   FilterableItemPopup,
   useChain,
 } from '@dao-dao/stateless'
-import { ChainId } from '@dao-dao/types'
+import { ChainId, getProtobufTypes } from '@dao-dao/types'
 import { ActionComponent } from '@dao-dao/types/actions'
 import {
-  PROTOBUF_TYPES,
-  makeStargateMessage,
-  makeWasmMessage,
+  convertJsonToCWCosmosMsg,
   objectMatchesStructure,
-  validateCosmosMsg,
+  validateCosmosMsgForChain,
 } from '@dao-dao/utils'
 
 export type CustomData = {
@@ -34,7 +31,7 @@ export const CustomComponent: ActionComponent = ({
 
   const types = useMemo(
     () =>
-      PROTOBUF_TYPES.filter(
+      getProtobufTypes().filter(
         ([type]) =>
           // Only show protobuf message types.
           type.split('.').pop()?.startsWith('Msg') &&
@@ -92,23 +89,12 @@ export const CustomComponent: ActionComponent = ({
         readOnly={!isCreating}
         transform={isCreating ? undefined : transformLongKeys}
         validation={[
-          (v: string) => {
-            let msg
+          (value: string) => {
             try {
-              msg = JSON5.parse(v)
-            } catch (e: any) {
-              return e.message as string
-            }
-
-            try {
-              if (msg.wasm) {
-                msg = makeWasmMessage(msg)
-              }
-              if (msg.stargate) {
-                msg = makeStargateMessage(msg)
-              }
-
-              validateCosmosMsg(msg)
+              validateCosmosMsgForChain(
+                chainId,
+                convertJsonToCWCosmosMsg(value)
+              )
             } catch (err) {
               return err instanceof Error ? err.message : `${err}`
             }
@@ -120,7 +106,7 @@ export const CustomComponent: ActionComponent = ({
 
       {errors?.message ? (
         <div className="flex flex-col gap-1">
-          <p className="flex items-center gap-1 text-sm text-text-interactive-error">
+          <p className="text-text-interactive-error flex items-center gap-1 text-sm">
             <Close className="!h-5 !w-5" />{' '}
             <span>{errors.message.message}</span>
           </p>
@@ -136,7 +122,7 @@ export const CustomComponent: ActionComponent = ({
           </a>
         </div>
       ) : (
-        <p className="flex items-center gap-1 text-sm text-text-interactive-valid">
+        <p className="text-text-interactive-valid flex items-center gap-1 text-sm">
           <Check className="!h-5 !w-5" /> {t('info.jsonIsValid')}
         </p>
       )}

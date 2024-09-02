@@ -5,6 +5,8 @@ import {
   GenericTokenSource,
   LooseGenericToken,
   PfmMemo,
+  SortFn,
+  TokenCardInfo,
 } from '@dao-dao/types'
 
 import { getChainForChainName, getIbcTransferInfoFromChannel } from './chain'
@@ -18,6 +20,11 @@ export const tokensEqual = (
   a.type === b.type &&
   a.denomOrAddress === b.denomOrAddress
 
+export const tokenSourcesEqual = (
+  a: GenericToken | GenericTokenSource,
+  b: GenericToken | GenericTokenSource
+): boolean => serializeTokenSource(a) === serializeTokenSource(b)
+
 export const serializeTokenSource = (
   tokenOrSource: GenericToken | GenericTokenSource
 ): string => {
@@ -25,6 +32,7 @@ export const serializeTokenSource = (
     'source' in tokenOrSource ? tokenOrSource.source : tokenOrSource
   return [source.chainId, source.type, source.denomOrAddress].join(':')
 }
+
 export const deserializeTokenSource = (source: string): GenericTokenSource => {
   const [chainId, type, denomOrAddress] = source.split(':')
   return {
@@ -113,3 +121,31 @@ export const getPfmFinalReceiverFromMemo = (memo: PfmMemo): string =>
   memo.forward.next
     ? getPfmFinalReceiverFromMemo(memo.forward.next)
     : memo.forward.receiver
+
+/**
+ * Function to sort token lists descending by USD value.
+ */
+export const sortTokensValueDescending: SortFn<
+  Pick<TokenCardInfo, 'token' | 'unstakedBalance' | 'lazyInfo'>
+> = (a, b) => {
+  // If loading or no price, show at bottom.
+  const aPrice =
+    a.lazyInfo.loading || !a.lazyInfo.data.usdUnitPrice?.usdPrice
+      ? undefined
+      : a.lazyInfo.data.totalBalance * a.lazyInfo.data.usdUnitPrice.usdPrice
+  const bPrice =
+    b.lazyInfo.loading || !b.lazyInfo.data.usdUnitPrice?.usdPrice
+      ? undefined
+      : b.lazyInfo.data.totalBalance * b.lazyInfo.data.usdUnitPrice.usdPrice
+
+  // If prices are equal, sort alphabetically by symbol.
+  return aPrice === bPrice
+    ? a.token.symbol
+        .toLocaleLowerCase()
+        .localeCompare(b.token.symbol.toLocaleLowerCase())
+    : aPrice === undefined
+    ? 1
+    : bPrice === undefined
+    ? -1
+    : bPrice - aPrice
+}

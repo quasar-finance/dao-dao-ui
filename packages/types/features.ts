@@ -4,6 +4,8 @@
 export enum ContractVersion {
   // Used when referring to gov module. Placeholder to force into DaoInfo shape.
   Gov = 'gov',
+  // Placeholder when failed to detect.
+  Unknown = 'unknown',
 
   // https://github.com/DA0-DA0/dao-contracts/releases/tag/v1.0.0
   V1 = '0.1.0',
@@ -25,6 +27,9 @@ export enum ContractVersion {
   V230 = '2.3.0',
   // https://github.com/DA0-DA0/dao-contracts/releases/tag/v2.4.0
   V240 = '2.4.0',
+  // https://github.com/DA0-DA0/dao-contracts/releases/tag/v2.4.2
+  V242 = '2.4.2',
+  V250 = '2.5.0',
 }
 
 /**
@@ -62,6 +67,10 @@ export enum Feature {
    */
   VoteUntilExpiration,
   /**
+   * Owner was removed from dao-voting-cw721-staked.
+   */
+  DaoVotingCw721StakedNoOwner,
+  /**
    * A `funds` field was added to module instantiate messages (such as when
    * adding proposal modules).
    */
@@ -80,6 +89,10 @@ export enum Feature {
    * Veto was added.
    */
   Veto,
+  /**
+   * The ability to specify a more granular pre-propose submission policy.
+   */
+  GranularSubmissionPolicy,
 }
 
 /**

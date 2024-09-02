@@ -5,8 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { ProposalVoterProps } from '@dao-dao/types'
 
 import { Button } from '../buttons'
-import { InfoCard } from '../InfoCard'
-import { WarningCard } from '../WarningCard'
+import { StatusCard } from '../StatusCard'
 import { ProposalVoteButton } from './ProposalVoteButton'
 
 export const ProposalVoter = <Vote extends unknown = unknown>({
@@ -24,6 +23,10 @@ export const ProposalVoter = <Vote extends unknown = unknown>({
   const [selectedVote, setSelectedVote] = useState<Vote | undefined>(
     currentVote
   )
+  // If currentVote changes, reset selected vote to it.
+  useEffect(() => {
+    setSelectedVote(currentVote)
+  }, [currentVote])
 
   const currentVoteOption = currentVote
     ? options.find((option) => option.value === currentVote)
@@ -50,15 +53,21 @@ export const ProposalVoter = <Vote extends unknown = unknown>({
     <div className={clsx('flex flex-col gap-4', className)}>
       {/* If has not seen all action pages, and has not yet cast a vote, show warning. */}
       {showUnseenActionPagesWarning && !seenAllActionPages && !currentVote && (
-        <WarningCard
+        <StatusCard
           className="animate-fade-in"
           content={t('info.mustViewAllActionPagesBeforeVoting')}
+          size="xs"
+          style="info"
         />
       )}
 
       {/* If proposal no longer open but voting is allowed, explain why. */}
       {!proposalOpen && (
-        <InfoCard content={t('info.voteUntilExpirationExplanation')} />
+        <StatusCard
+          content={t('info.voteUntilExpirationExplanation')}
+          size="xs"
+          style="info"
+        />
       )}
 
       <div className="flex flex-col gap-1">
@@ -100,3 +109,7 @@ export const ProposalVoter = <Vote extends unknown = unknown>({
     </div>
   )
 }
+
+export const ProposalVoterLoading = (
+  props: Omit<ProposalVoterProps<any>, 'loading' | 'currentVote' | 'onCastVote'>
+) => <ProposalVoter loading onCastVote={() => {}} {...props} />

@@ -272,3 +272,11 @@ export const ComputerDiskEmoji = () => (
 export const PlayPauseEmoji = () => (
   <EmojiWrapper emoji="⏯️" labelI18nKey="emoji.playPause" />
 )
+
+export const PufferfishEmoji = () => (
+  <EmojiWrapper emoji="🐡" labelI18nKey="emoji.pufferfish" />
+)
+
+export const CheckEmoji = () => (
+  <EmojiWrapper emoji="✅" labelI18nKey="emoji.check" />
+)

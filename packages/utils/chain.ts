@@ -1,24 +1,29 @@
 import { Buffer } from 'buffer'
 
-import { asset_lists } from '@chain-registry/assets'
 import { AssetList, Chain, IBCInfo } from '@chain-registry/types'
 import { fromBech32, fromHex, toBech32 } from '@cosmjs/encoding'
-import { GasPrice } from '@cosmjs/stargate'
-import { assets, chains, ibc } from 'chain-registry'
 import RIPEMD160 from 'ripemd160'
 import semverGte from 'semver/functions/gte'
 
 import {
+  Account,
   BaseChainConfig,
   ChainId,
   ConfiguredChain,
+  ContractVersion,
+  DaoInfo,
+  Feature,
   GenericToken,
   SupportedChain,
   SupportedChainConfig,
+  SupportedFeatureMap,
   TokenType,
   Validator,
 } from '@dao-dao/types'
-import { cosmos } from '@dao-dao/utils/protobuf'
+import {
+  Validator as RpcValidator,
+  bondStatusToJSON,
+} from '@dao-dao/types/protobuf/codegen/cosmos/staking/v1beta1/staking'
 
 import { getChainAssets } from './assets'
 import {
@@ -26,15 +31,20 @@ import {
   CONFIGURED_CHAINS,
   MAINNET,
   SUPPORTED_CHAINS,
+  assets,
+  chains,
+  ibc,
 } from './constants'
 import { getFallbackImage } from './getFallbackImage'
-import { aminoTypes, typesRegistry } from './messages/protobuf'
-import { ModuleAccount } from './protobuf/codegen/cosmos/auth/v1beta1/auth'
-import {
-  Validator as RpcValidator,
-  bondStatusToJSON,
-} from './protobuf/codegen/cosmos/staking/v1beta1/staking'
 
+/**
+ * Get the RPC for the given chain.
+ *
+ * @param chainId Chain to get RPC for.
+ * @param offset Offset will try a different URL from the list of available
+ * RPCs.
+ * @returns RPC for the given chain.
+ */
 export const getRpcForChainId = (
   chainId: string,
   // Offset will try a different RPC from the list of available RPCs.
@@ -45,13 +55,58 @@ export const getRpcForChainId = (
       CHAIN_ENDPOINTS[chainId as keyof typeof CHAIN_ENDPOINTS]) ||
     {}
   )?.rpc
-  if (rpc && offset === 0) {
+  // Try preferred RPC 3 times before falling back to chain registry.
+  if (rpc && offset < 3) {
     return rpc
   }
 
-  // If RPC was found but not used, offset > 0, and subtract 1 from offset so we
-  // try the first RPC in the chain registry list.
+  // If RPC was found but not used, offset > 3, so subtract 3 so we start trying
+  // the first RPC in the chain registry list.
   if (rpc) {
+    offset -= 3
+  }
+
+  // Fallback to chain registry.
+  const chain = maybeGetChainForChainId(chainId)
+  if (!chain) {
+    throw new Error(`Unknown chain ID "${chainId}"`)
+  }
+
+  const rpcs = [
+    // Try cosmos.directory RPC first.
+    { address: 'https://rpc.cosmos.directory/' + chain.chain_name },
+    // Fallback to chain registry.
+    ...(chain?.apis?.rpc ?? []),
+  ]
+
+  return rpcs[offset % rpcs.length].address.replace(/http:\/\//, 'https://')
+}
+
+/**
+ * Get the LCD for the given chain.
+ *
+ * @param chainId Chain to get LCD for.
+ * @param offset Offset will try a different URL from the list of available
+ * LCDs.
+ * @returns LCD for the given chain.
+ */
+export const getLcdForChainId = (
+  chainId: string,
+  // Offset will try a different LCD from the list of available LCDs.
+  offset = 0
+): string => {
+  let lcd = (
+    (chainId in CHAIN_ENDPOINTS &&
+      CHAIN_ENDPOINTS[chainId as keyof typeof CHAIN_ENDPOINTS]) ||
+    {}
+  )?.rest
+  if (lcd && offset === 0) {
+    return lcd
+  }
+
+  // If LCD was found but not used, offset > 0, and subtract 1 from offset so we
+  // try the first LCD in the chain registry list.
+  if (lcd) {
     offset -= 1
   }
 
@@ -61,12 +116,12 @@ export const getRpcForChainId = (
     throw new Error(`Unknown chain ID "${chainId}"`)
   }
 
-  const rpcs = chain?.apis?.rpc ?? []
-  if (rpcs.length === 0) {
-    throw new Error(`No RPCs found for chain ID "${chainId}"`)
+  const lcds = chain?.apis?.rest ?? []
+  if (lcds.length === 0) {
+    throw new Error(`No LCD found for chain ID "${chainId}"`)
   }
 
-  return rpcs[offset % rpcs.length].address.replace(/http:\/\//, 'https://')
+  return lcds[offset % lcds.length].address.replace(/http:\/\//, 'https://')
 }
 
 export const cosmosValidatorToValidator = ({
@@ -117,7 +172,8 @@ export const getImageUrlForChainId = (chainId: string): string => {
   const image =
     (chainId === ChainId.OsmosisMainnet ||
     chainId === ChainId.OsmosisTestnet ||
-    chainId === ChainId.NeutronMainnet
+    chainId === ChainId.NeutronMainnet ||
+    chainId === ChainId.NeutronTestnet
       ? nativeTokenImageUrl
       : chainImageUrl) ||
     nativeTokenImageUrl ||
@@ -126,10 +182,18 @@ export const getImageUrlForChainId = (chainId: string): string => {
   return image
 }
 
-// Convert public key in hex format to a bech32 address.
-// https://github.com/cosmos/cosmos-sdk/blob/e09516f4795c637ab12b30bf732ce5d86da78424/crypto/keys/secp256k1/secp256k1.go#L152-L162
-// Keplr implementation:
-// https://github.com/chainapsis/keplr-wallet/blob/088dc701ce14df77a1ee22b7e39c651e50879d9f/packages/crypto/src/key.ts#L56-L63
+/**
+ * Convert secp256k1 public key in hex format to a bech32 address.
+ *
+ * Be very careful to ensure the public key is actually a secp256k1 key. Some
+ * chains, like Injective, use a different curve than secp256k1 and thus this
+ * will not work.
+ *
+ * https://github.com/cosmos/cosmos-sdk/blob/e09516f4795c637ab12b30bf732ce5d86da78424/crypto/keys/secp256k1/secp256k1.go#L152-L162
+ *
+ * Keplr implementation:
+ * https://github.com/chainapsis/keplr-wallet/blob/088dc701ce14df77a1ee22b7e39c651e50879d9f/packages/crypto/src/key.ts#L56-L63
+ */
 export const secp256k1PublicKeyToBech32Address = async (
   hexPublicKey: string,
   bech32Prefix: string
@@ -167,7 +231,7 @@ export const maybeGetAssetListForChainId = (
 ): AssetList | undefined => {
   const { chain_name: name } = maybeGetChainForChainId(chainId) ?? {}
   if (name) {
-    cachedAssetListsById[chainId] ||= asset_lists.find(
+    cachedAssetListsById[chainId] ||= assets.find(
       ({ chain_name }) => chain_name === name
     )
   }
@@ -179,6 +243,7 @@ export const maybeGetChainForChainName = (
   chainName: string
 ): Chain | undefined =>
   chains.find(({ chain_name }) => chain_name === chainName)
+
 export const getChainForChainName = (chainName: string): Chain => {
   cachedChainsByName[chainName] ||= maybeGetChainForChainName(chainName)
   if (!cachedChainsByName[chainName]) {
@@ -189,6 +254,12 @@ export const getChainForChainName = (chainName: string): Chain => {
 
 export const getDisplayNameForChainId = (chainId: string): string =>
   maybeGetChainForChainId(chainId)?.pretty_name ?? chainId
+
+/**
+ * Get the description for a chain's native governance DAO.
+ */
+export const getChainGovernanceDaoDescription = (chainId: string): string =>
+  `Native chain governance for ${getDisplayNameForChainId(chainId)}.`
 
 const cachedNativeTokens: Record<string, GenericToken | undefined> = {}
 export const getNativeTokenForChainId = (chainId: string): GenericToken => {
@@ -249,11 +320,18 @@ export const maybeGetNativeTokenForChainId = (
 }
 
 const cachedTokens: Record<string, GenericToken | undefined> = {}
+/**
+ * Find a token in the local asset list, if it exists. Depending on the value of
+ * the `placeholder` argument, it will either return an empty token placeholder
+ * or error.
+ */
 export const getTokenForChainIdAndDenom = (
   chainId: string,
   denom: string,
-  // If true, will return placeholder token if not found. If false, will throw
-  // error.
+  /**
+   * If true, will return placeholder token if not found. If false, will throw
+   * error.
+   */
   placeholder = true
 ): GenericToken => {
   try {
@@ -303,8 +381,9 @@ export const getIbcTransferInfoBetweenChains = (
   destChainId: string
 ): {
   sourceChain: IBCInfo['chain_1']
-  destinationChain: IBCInfo['chain_1']
   sourceChannel: string
+  destinationChain: IBCInfo['chain_1']
+  destinationChannel: string
   info: IBCInfo
 } => {
   const { chain_name: srcChainName } = getChainForChainId(srcChainId)
@@ -312,16 +391,16 @@ export const getIbcTransferInfoBetweenChains = (
 
   const info = ibc.find(
     ({ chain_1, chain_2, channels }) =>
-      (chain_1.chain_name === srcChainName &&
+      ((chain_1.chain_name === srcChainName &&
         chain_2.chain_name === destChainName) ||
-      (chain_1.chain_name === destChainName &&
-        chain_2.chain_name === srcChainName &&
-        channels.some(
-          ({ chain_1, chain_2, version }) =>
-            version === 'ics20-1' &&
-            chain_1.port_id === 'transfer' &&
-            chain_2.port_id === 'transfer'
-        ))
+        (chain_1.chain_name === destChainName &&
+          chain_2.chain_name === srcChainName)) &&
+      channels.some(
+        ({ chain_1, chain_2, version }) =>
+          version === 'ics20-1' &&
+          chain_1.port_id === 'transfer' &&
+          chain_2.port_id === 'transfer'
+      )
   )
   if (!info) {
     throw new Error(
@@ -352,6 +431,7 @@ export const getIbcTransferInfoBetweenChains = (
     sourceChain: info[`chain_${srcChainNumber}`],
     sourceChannel: channel[`chain_${srcChainNumber}`].channel_id,
     destinationChain: info[`chain_${destChainNumber}`],
+    destinationChannel: channel[`chain_${destChainNumber}`].channel_id,
     info,
   }
 }
@@ -423,17 +503,43 @@ export const getConfiguredChainConfig = (
 ): BaseChainConfig | undefined =>
   CONFIGURED_CHAINS.find((config) => config.chainId === chainId)
 
+export const mustGetConfiguredChainConfig = (
+  chainId: string
+): BaseChainConfig => {
+  const config = getConfiguredChainConfig(chainId)
+  if (!config) {
+    throw new Error(`Unconfigured chain: ${chainId}`)
+  }
+
+  return config
+}
+
 export const getConfiguredChains = ({
   mainnet = MAINNET,
 }: {
   mainnet?: boolean
 } = {}): ConfiguredChain[] =>
-  CONFIGURED_CHAINS.filter(
-    (config) => mainnet === undefined || config.mainnet === mainnet
-  ).map((config) => ({
-    chain: getChainForChainId(config.chainId),
-    ...config,
-  }))
+  CONFIGURED_CHAINS.filter((config) => config.mainnet === mainnet).map(
+    (config) => ({
+      chain: getChainForChainId(config.chainId),
+      ...config,
+    })
+  )
+
+/**
+ * Find configured chain with governance module by name.
+ */
+export const getConfiguredGovChainByName = (govName: string) =>
+  getConfiguredChains().find(({ name, noGov }) => name === govName && !noGov)
+
+/**
+ * Whether or not a given string is the configured name for a given chain. This
+ * is used to represent the x/gov module of a chain as a DAO.
+ */
+export const isConfiguredChainName = (chainId: string, key: string) => {
+  const chainConfig = getConfiguredChainConfig(chainId)
+  return !!chainConfig && key === chainConfig.name
+}
 
 export const getIbcTransferInfoFromConnection = (
   sourceChainId: string,
@@ -488,13 +594,33 @@ export const mustGetSupportedChainConfig = (
   return config
 }
 
+/**
+ * Whether or not this chain is supported.
+ */
+export const isSupportedChain = (chainId: string): boolean =>
+  getSupportedChainConfig(chainId) !== undefined
+
+/**
+ * Get chains with DAO DAO deployed.
+ */
 export const getSupportedChains = ({
   mainnet = MAINNET,
+  hasIndexer,
 }: {
+  /**
+   * Whether or not to fetch supported chains on mainnet or testnet. Defaults to
+   * MAINNET environment variable.
+   */
   mainnet?: boolean
+  /**
+   * Whether or not to filter by chains that have an indexer. Defaults to all.
+   */
+  hasIndexer?: boolean
 } = {}): SupportedChain[] =>
   SUPPORTED_CHAINS.filter(
-    (config) => mainnet === undefined || config.mainnet === mainnet
+    (config) =>
+      (mainnet === undefined || config.mainnet === mainnet) &&
+      (hasIndexer === undefined || hasIndexer === !config.noIndexer)
   ).map((config) => ({
     chain: getChainForChainId(config.chainId),
     ...config,
@@ -508,24 +634,26 @@ export const chainIsIndexed = (chainId: string): boolean =>
     (config) => config.chainId === chainId && !config.noIndexer
   )
 
-// Validates whether the address is for the current chain. If so, return
-// undefined. If not, return the correct subdomain.
-export const getChainIdForAddress = (address: string): string => {
+/**
+ * Returns the supported chain IDs for the given address based on the prefix.
+ * Throws error if none found.
+ */
+export const getChainIdsForAddress = (address: string): string[] => {
   const supportedChains = getSupportedChains()
 
   // Match supported chain from address prefix. Hopefully there is only one. Use
   // the first.
   const { prefix } = fromBech32(address)
-  const chainForAddress = supportedChains.find(
+  const chainsForAddress = supportedChains.filter(
     ({ chain, mainnet }) =>
       chain.bech32_prefix === prefix && mainnet === MAINNET
   )
 
-  if (!chainForAddress) {
+  if (!chainsForAddress.length) {
     throw new Error(`Unsupported chain: unrecognized prefix "${prefix}"`)
   }
 
-  return chainForAddress.chain.chain_id
+  return chainsForAddress.map((c) => c.chainId)
 }
 
 /**
@@ -546,72 +674,69 @@ export const cosmosSdkVersionIs46OrHigher = (version: string) =>
 export const cosmosSdkVersionIs47OrHigher = (version: string) =>
   semverGte(version, '0.47.0')
 
-export const getSignerOptions = ({ chain_id, fees }: Chain) => {
-  let gasPrice
-  try {
-    const nativeToken = getNativeTokenForChainId(chain_id)
-    const feeToken = fees?.fee_tokens.find(
-      ({ denom }) => denom === nativeToken.denomOrAddress
-    )
-    const gasPriceAmount =
-      feeToken?.average_gas_price ??
-      feeToken?.high_gas_price ??
-      feeToken?.low_gas_price ??
-      feeToken?.fixed_min_gas_price
+/**
+ * Get the DAO info object for a given chain ID.
+ */
+export const getDaoInfoForChainId = (
+  chainId: string,
+  accounts: Account[]
+): DaoInfo => ({
+  chainId,
+  coreAddress: mustGetConfiguredChainConfig(chainId).name,
+  coreVersion: ContractVersion.Gov,
+  supportedFeatures: Object.values(Feature).reduce(
+    (acc, feature) => ({
+      ...acc,
+      [feature]: false,
+    }),
+    {} as SupportedFeatureMap
+  ),
+  votingModuleAddress: '',
+  votingModuleInfo: {
+    contract: '',
+    version: '',
+  },
+  proposalModules: [],
+  name: getDisplayNameForChainId(chainId),
+  description: getChainGovernanceDaoDescription(chainId),
+  imageUrl: getImageUrlForChainId(chainId),
+  created: null,
+  isActive: true,
+  activeThreshold: null,
+  items: {},
+  polytoneProxies: {},
+  accounts,
+  parentDao: null,
+  admin: '',
+  contractAdmin: null,
+})
 
-    gasPrice =
-      feeToken && feeToken.denom.length >= 3 && gasPriceAmount !== undefined
-        ? GasPrice.fromString(gasPriceAmount + feeToken.denom)
-        : undefined
-  } catch {}
+/**
+ * Whether or not the chain ID is Secret Network mainnet or testnet.
+ */
+export const isSecretNetwork = (chainId: string): boolean =>
+  chainId === ChainId.SecretMainnet || chainId === ChainId.SecretTestnet
 
-  return {
-    gasPrice,
-    registry: typesRegistry,
-    aminoTypes,
+/**
+ * Get the null wallet address to use as a placeholder when the wallet isn't
+ * connected.
+ */
+export const getNullWalletForChain = (chainId: string): string =>
+  toBech32(
+    getChainForChainId(chainId).bech32_prefix,
+    new Uint8Array([...Array(20)].fill(0))
+  )
+
+/**
+ * Get the public key type used for wallets on a given chain.
+ *
+ * TODO(public key): can we locate this somehow?
+ */
+export const getPublicKeyTypeForChain = (chainId: string): string => {
+  switch (chainId) {
+    case ChainId.InjectiveMainnet:
+      return '/injective.crypto.v1beta1.ethsecp256k1.PubKey'
+    default:
+      return '/cosmos.crypto.secp256k1.PubKey'
   }
-}
-
-// Check whether or not the address is a module account.
-export const addressIsModule = async (
-  client: Awaited<
-    ReturnType<typeof cosmos.ClientFactory.createRPCQueryClient>
-  >['cosmos'],
-  address: string,
-  // If defined, check that the module is this module.
-  moduleName?: string
-): Promise<boolean> => {
-  try {
-    const { account } = await client.auth.v1beta1.account({
-      address,
-    })
-
-    if (!account) {
-      return false
-    }
-
-    if (account.typeUrl === ModuleAccount.typeUrl) {
-      const moduleAccount = ModuleAccount.decode(account.value)
-      return !moduleName || moduleAccount.name === moduleName
-
-      // If already decoded automatically.
-    } else if (account.$typeUrl === ModuleAccount.typeUrl) {
-      return (
-        !moduleName || (account as unknown as ModuleAccount).name === moduleName
-      )
-    }
-  } catch (err) {
-    if (
-      err instanceof Error &&
-      (err.message.includes('not found: key not found') ||
-        err.message.includes('decoding bech32 failed'))
-    ) {
-      return false
-    }
-
-    // Rethrow other errors.
-    throw err
-  }
-
-  return false
 }

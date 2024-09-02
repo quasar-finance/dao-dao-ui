@@ -12,11 +12,10 @@ import {
 import {
   BankEmoji,
   DaoSupportedChainPickerInput,
-  Loader,
   useCachedLoading,
   useChain,
 } from '@dao-dao/stateless'
-import { ChainId, TokenType } from '@dao-dao/types'
+import { ChainId, TokenType, makeStargateMessage } from '@dao-dao/types'
 import {
   ActionComponent,
   ActionContextType,
@@ -26,19 +25,17 @@ import {
   UseDefaults,
   UseTransformToCosmos,
 } from '@dao-dao/types/actions'
+import { ProposalStatus } from '@dao-dao/types/protobuf/codegen/cosmos/gov/v1beta1/gov'
+import { MsgDeposit } from '@dao-dao/types/protobuf/codegen/cosmos/gov/v1beta1/tx'
 import {
   decodePolytoneExecuteMsg,
   getChainAddressForActionOptions,
   isDecodedStargateMsg,
-  makeStargateMessage,
   maybeMakePolytoneExecuteMessage,
   objectMatchesStructure,
 } from '@dao-dao/utils'
-import { ProposalStatus } from '@dao-dao/utils/protobuf/codegen/cosmos/gov/v1beta1/gov'
-import { MsgDeposit } from '@dao-dao/utils/protobuf/codegen/cosmos/gov/v1beta1/tx'
 
 import { GovProposalActionDisplay } from '../../../../components'
-import { SuspenseLoader } from '../../../../components/SuspenseLoader'
 import { TokenAmountDisplay } from '../../../../components/TokenAmountDisplay'
 import { GovActionsProvider, useActionOptions } from '../../../react'
 import {
@@ -67,11 +64,9 @@ const Component: ActionComponent<undefined, GovernanceDepositData> = (
         />
       )}
 
-      <SuspenseLoader fallback={<Loader />}>
-        <GovActionsProvider>
-          <InnerComponent {...props} />
-        </GovActionsProvider>
-      </SuspenseLoader>
+      <GovActionsProvider>
+        <InnerComponent {...props} />
+      </GovActionsProvider>
     </>
   )
 }
@@ -205,7 +200,8 @@ export const makeGovernanceDepositAction: ActionMaker<GovernanceDepositData> = (
     // Governance module cannot participate in governance.
     context.type === ActionContextType.Gov ||
     // Neutron does not use the x/gov module.
-    currentChainId === ChainId.NeutronMainnet
+    currentChainId === ChainId.NeutronMainnet ||
+    currentChainId === ChainId.NeutronTestnet
   ) {
     return null
   }

@@ -1,11 +1,12 @@
 import { Image } from '@mui/icons-material'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import toast from 'react-hot-toast'
 import { useTranslation } from 'react-i18next'
 import { useRecoilState, useRecoilValue } from 'recoil'
 
 import {
+  allWalletNftsSelector,
   nftCardInfosForKeyAtom,
   updateProfileNftVisibleAtom,
 } from '@dao-dao/state/recoil'
@@ -28,18 +29,20 @@ import {
   getDisplayNameForChainId,
   getNftKey,
   getSupportedChainConfig,
+  getSupportedChains,
+  isSecretNetwork,
   processError,
   uploadNft,
 } from '@dao-dao/utils'
 
 import {
   useInstantiateAndExecute,
-  useSupportedChainWallets,
+  useManageProfile,
+  useProfile,
   useWallet,
-  useWalletInfo,
 } from '../hooks'
-import { allWalletNftsSelector } from '../recoil'
 import { NftSelectionModal } from './nft'
+import { ProfileAddChains } from './profile'
 import { SuspenseLoader } from './SuspenseLoader'
 import { Trans } from './Trans'
 
@@ -57,45 +60,49 @@ export const InnerPfpkNftSelectionModal = ({
     isWalletError,
     message: walletErrorMessage,
     chain,
+    refreshBalances,
   } = useWallet({
     attemptConnection: visible,
   })
 
-  const chainWallets = useSupportedChainWallets({
-    attemptConnection: visible,
+  const { chains } = useProfile({
+    onlySupported: true,
   })
 
+  const allChainsAdded =
+    !chains.loading && chains.data.length === getSupportedChains().length
+
+  // Don't load NFTs until visible for the first time. This avoids having to use
+  // visible directly in the cached loading hook below, which causes a flicker
+  // on close.
+  const wasVisibleOnce = useRef(visible)
+  if (visible) {
+    wasVisibleOnce.current = true
+  }
+
   const nfts = useCachedLoadingWithError(
-    // Don't load NFTs until visible.
-    visible && chainWallets.every(({ chainWallet: { address } }) => address)
+    wasVisibleOnce.current && !chains.loading
       ? // Load NFTs for all DAO DAO-supported chains.
         allWalletNftsSelector(
-          chainWallets.flatMap(({ chainWallet: { chain, address } }) =>
-            address
-              ? {
-                  chainId: chain.chain_id,
-                  walletAddress: address,
-                }
-              : []
-          )
+          chains.data.map(({ chainId, address }) => ({
+            chainId,
+            walletAddress: address,
+          }))
         )
       : undefined
   )
 
   const {
-    walletProfileData,
-    updateProfileNft,
-    updatingProfile,
-    backupImageUrl,
-    refreshBalances,
-  } = useWalletInfo()
+    profile,
+    updateProfile: { updating: updatingProfile, go: updateProfile },
+  } = useManageProfile()
   // Initialize to selected NFT.
   const [selectedKey, setSelectedKey] = useState<string | undefined>(
-    !walletProfileData.loading && walletProfileData.profile.nft
+    !profile.loading && profile.data.nft
       ? getNftKey(
-          walletProfileData.profile.nft.chainId,
-          walletProfileData.profile.nft.collectionAddress,
-          walletProfileData.profile.nft.tokenId
+          profile.data.nft.chainId,
+          profile.data.nft.collectionAddress,
+          profile.data.nft.tokenId
         )
       : undefined
   )
@@ -105,50 +112,45 @@ export const InnerPfpkNftSelectionModal = ({
       : undefined
   // If nonce changes, set selected NFT.
   const [lastNonce, setLastNonce] = useState(
-    walletProfileData.loading ? 0 : walletProfileData.profile.nonce
+    profile.loading ? 0 : profile.data.nonce
   )
   useEffect(() => {
     if (
-      !walletProfileData.loading &&
-      walletProfileData.profile.nft &&
-      walletProfileData.profile.nonce > lastNonce
+      !profile.loading &&
+      profile.data.nft &&
+      profile.data.nonce > lastNonce
     ) {
       setSelectedKey(
         getNftKey(
-          walletProfileData.profile.nft.chainId,
-          walletProfileData.profile.nft.collectionAddress,
-          walletProfileData.profile.nft.tokenId
+          profile.data.nft.chainId,
+          profile.data.nft.collectionAddress,
+          profile.data.nft.tokenId
         )
       )
-      setLastNonce(walletProfileData.profile.nonce)
+      setLastNonce(profile.data.nonce)
     }
-  }, [lastNonce, walletProfileData])
+  }, [lastNonce, profile])
 
   const onAction = useCallback(async () => {
-    if (nfts.loading) {
-      toast.error(t('error.noNftsSelected'))
-      return
-    }
-
     // Only give error about no NFTs if something should be selected. This
     // should never happen...
-    if (selectedKey && !selectedNft) {
+    if (nfts.loading || (selectedKey && !selectedNft)) {
       toast.error(t('error.noNftsSelected'))
       return
     }
 
     try {
       // Update NFT only.
-      await updateProfileNft(
-        selectedNft
+      await updateProfile({
+        nft: selectedNft
           ? {
               chainId: selectedNft.chainId,
               collectionAddress: selectedNft.collectionAddress,
               tokenId: selectedNft.tokenId,
             }
           : // Clear NFT if nothing selected.
-            null
-      )
+            null,
+      })
       // Close on successful update.
       onClose()
     } catch (err) {
@@ -159,7 +161,7 @@ export const InnerPfpkNftSelectionModal = ({
         })
       )
     }
-  }, [nfts, selectedKey, selectedNft, t, updateProfileNft, onClose])
+  }, [nfts.loading, selectedKey, selectedNft, t, updateProfile, onClose])
 
   const [showImageSelector, setShowImageSelector] = useState(false)
   const { register, setValue, watch } = useForm<{ image: string }>()
@@ -168,14 +170,17 @@ export const InnerPfpkNftSelectionModal = ({
   const [uploadingImage, setUploadingImage] = useState(false)
 
   // Upload profile photos to Juno mainnet when on a chain without the cw721
-  // code ID (like Stargaze). Otherwise, just use the currently connected chain.
-  // Stargaze uses sg721 instead of cw721 NFTs, and sg721 costs STARS to mint.
-  // We don't want to list user's profile photos on the Stargaze marketplace nor
-  // charge them for uploading a profile photo.
+  // code ID (like Stargaze) or on Secret Network (since it doesn't support
+  // instantiate2). Otherwise, just use the currently connected chain. Stargaze
+  // uses sg721 instead of cw721 NFTs, and sg721 costs STARS to mint. We don't
+  // want to list user's profile photos on the Stargaze marketplace nor charge
+  // them for uploading a profile photo.
   const uploadWallet = useWallet({
-    chainId: getSupportedChainConfig(chain.chain_id)?.codeIds?.Cw721Base
-      ? chain.chain_id
-      : ChainId.JunoMainnet,
+    chainId:
+      !isSecretNetwork(chain.chain_id) &&
+      getSupportedChainConfig(chain.chain_id)?.codeIds?.Cw721Base
+        ? chain.chain_id
+        : ChainId.JunoMainnet,
     // Attempt connection to upload wallet chain when image selector is visible.
     attemptConnection: showImageSelector,
   })
@@ -281,6 +286,28 @@ export const InnerPfpkNftSelectionModal = ({
           title: t('title.chooseProfilePicture'),
           subtitle: t('info.chooseProfilePictureSubtitle'),
         }}
+        headerContent={
+          chains.loading ? undefined : (
+            <ProfileAddChains
+              className="self-start"
+              disabled={allChainsAdded}
+              onlySupported
+              prompt={
+                allChainsAdded
+                  ? t('info.allNftSupportedChainsAddedPrompt')
+                  : t('info.supportedChainNftsNotShowingUpPrompt')
+              }
+              promptClassName={allChainsAdded ? '!italic' : undefined}
+              promptTooltip={
+                allChainsAdded
+                  ? t('info.allNftSupportedChainsAddedPromptTooltip')
+                  : t('info.supportedChainNftsNotShowingUpPromptTooltip')
+              }
+              size="sm"
+              textPrompt
+            />
+          )
+        }
         nfts={
           isWalletError && walletErrorMessage
             ? {
@@ -322,16 +349,19 @@ export const InnerPfpkNftSelectionModal = ({
                   !nfts.loading
                     ? selectedNft
                       ? nftCardInfosForKey[selectedNft.key]?.imageUrl
-                      : backupImageUrl
+                      : profile.loading
+                      ? undefined
+                      : profile.data.backupImageUrl
                     : undefined
                 }
                 loading={
                   nfts.loading ||
                   // If selected NFT but info not yet loaded, we're loading.
-                  (selectedNft &&
-                    !nftCardInfosForKey[selectedNft.key]?.imageUrl)
+                  (selectedNft
+                    ? !nftCardInfosForKey[selectedNft.key]?.imageUrl
+                    : profile.loading)
                 }
-                size="sm"
+                size="md"
               />
             </div>
           </Tooltip>

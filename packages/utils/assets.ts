@@ -1,10 +1,8 @@
-import { asset_lists } from '@chain-registry/assets'
-import { fromBech32 } from '@cosmjs/encoding'
-
 import { GenericToken, TokenType } from '@dao-dao/types'
 
 import { getChainForChainId } from './chain'
-import { concatAddressStartEnd } from './conversion'
+import { assets } from './constants'
+import { abbreviateAddress, abbreviateString } from './conversion'
 import { getFallbackImage } from './getFallbackImage'
 
 // Cache once loaded.
@@ -20,7 +18,7 @@ const chainAssetsMap: Record<
 export const getChainAssets = (chainId: string) => {
   if (!chainAssetsMap[chainId]) {
     chainAssetsMap[chainId] =
-      asset_lists
+      assets
         .find(
           ({ chain_name }) =>
             chain_name === getChainForChainId(chainId).chain_name
@@ -33,11 +31,13 @@ export const getChainAssets = (chainId: string) => {
             name,
             display,
             denom_units,
+            type_asset,
           }) => ({
             chainId,
             id: display,
-            type: TokenType.Native,
-            denomOrAddress: base,
+            type: type_asset === 'cw20' ? TokenType.Cw20 : TokenType.Native,
+            denomOrAddress:
+              type_asset === 'cw20' ? base.replace('cw20:', '') : base,
             denomAliases:
               denom_units.find(({ denom }) => denom === base)?.aliases ?? [],
             symbol,
@@ -51,8 +51,9 @@ export const getChainAssets = (chainId: string) => {
             // This will be wrong when this is an IBC asset.
             source: {
               chainId,
-              type: TokenType.Native,
-              denomOrAddress: base,
+              type: type_asset === 'cw20' ? TokenType.Cw20 : TokenType.Native,
+              denomOrAddress:
+                type_asset === 'cw20' ? base.replace('cw20:', '') : base,
             },
           })
         )
@@ -93,25 +94,14 @@ export const shortenTokenSymbol = (
   const isIbc = symbol.toLowerCase().startsWith('ibc')
   const isFactory = symbol.toLowerCase().startsWith('factory')
 
-  // Get the bech32 prefix length of the factory token's creator address.
-  let factoryCreatorAddressPrefixLength = 5
-  if (isFactory) {
-    try {
-      factoryCreatorAddressPrefixLength = fromBech32(symbol.split('/')[1])
-        .prefix.length
-    } catch {}
-  }
-
   // Truncate denominations to prevent overflow.
   const tokenSymbol = isIbc
-    ? concatAddressStartEnd(symbol, 7, 3)
+    ? abbreviateString(symbol, 7, 3)
     : isFactory
     ? // Truncate address in middle.
-      `factory/${concatAddressStartEnd(
-        symbol.split('/')[1],
-        factoryCreatorAddressPrefixLength + 3,
-        3
-      )}/${symbol.split('/')[2]}`
+      `factory/${abbreviateAddress(symbol.split('/')[1], 3)}/${
+        symbol.split('/')[2]
+      }`
     : symbol
 
   return {

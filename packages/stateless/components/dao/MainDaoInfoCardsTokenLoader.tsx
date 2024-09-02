@@ -2,7 +2,7 @@ import { useTranslation } from 'react-i18next'
 
 import { formatDate } from '@dao-dao/utils'
 
-import { useDaoInfoContext } from '../../hooks'
+import { useDaoInfoContext } from '../../contexts'
 import { DaoInfoCards } from './DaoInfoCards'
 
 /**
@@ -21,7 +21,7 @@ export const MainDaoInfoCardsTokenLoader = () => {
               {
                 label: t('title.established'),
                 tooltip: t('info.establishedTooltip'),
-                value: formatDate(created),
+                value: formatDate(new Date(created)),
               },
             ]
           : []),

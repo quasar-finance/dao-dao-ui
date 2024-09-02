@@ -3,12 +3,11 @@ import { useFormContext } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 
 import { ProposalContentDisplay } from '@dao-dao/stateless'
-import { MultipleChoiceOptionType } from '@dao-dao/types/contracts/DaoProposalMultiple'
 import { convertActionsToMessages } from '@dao-dao/utils'
 
 import { useLoadedActionsAndCategories } from '../../../../../actions'
 import { EntityDisplay, SuspenseLoader } from '../../../../../components'
-import { useEntity, useWalletInfo } from '../../../../../hooks'
+import { useEntity, useWallet } from '../../../../../hooks'
 import { MULTIPLE_CHOICE_OPTION_COLORS } from '../../components/MultipleChoiceOptionEditor'
 import { MultipleChoiceOptionViewer } from '../../components/MultipleChoiceOptionViewer'
 import { NewProposalForm } from '../../types'
@@ -18,8 +17,8 @@ export const NewProposalPreview = () => {
   const { watch } = useFormContext<NewProposalForm>()
 
   const { loadedActions } = useLoadedActionsAndCategories()
-  const { walletAddress = '' } = useWalletInfo()
-  const entity = useEntity(walletAddress)
+  const { address: walletAddress = '' } = useWallet()
+  const { entity } = useEntity(walletAddress)
 
   const proposalDescription = watch('description')
   const proposalTitle = watch('title')
@@ -48,7 +47,7 @@ export const NewProposalPreview = () => {
                   index,
                   msgs: [],
                   title,
-                  option_type: MultipleChoiceOptionType.Standard,
+                  option_type: 'standard',
                   vote_count: '0',
                 },
                 actionData: [],
@@ -83,7 +82,7 @@ export const NewProposalPreview = () => {
                 index: choices.length,
                 msgs: [],
                 title: '',
-                option_type: MultipleChoiceOptionType.None,
+                option_type: 'none',
                 vote_count: '0',
               },
               actionData: [],

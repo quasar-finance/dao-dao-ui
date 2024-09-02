@@ -1,8 +1,11 @@
 // These are all used elsewhere in the codebase.
 export enum ContractName {
   Cw1Whitelist = 'crates.io:cw1-whitelist',
+  Cw3FixedMultisig = 'crates.io:cw3-fixed-multisig',
+  Cw3FlexMultisig = 'crates.io:cw3-flex-multisig',
   CwTokenSwap = 'crates.io:cw-token-swap',
-  CwTokenfactoryIssuer = 'crates.io:cw-tokenfactory-issuer',
+  // This contract left out the `crates.io:` prefix.
+  CwTokenfactoryIssuer = 'cw-tokenfactory-issuer',
   PolytoneProxy = 'crates.io:polytone-proxy',
   PreProposeSingle = 'crates.io:dao-pre-propose-single',
   PreProposeApprovalSingle = 'crates.io:dao-pre-propose-approval-single',
@@ -11,6 +14,9 @@ export enum ContractName {
   NeutronCwdSubdaoPreProposeSingle = 'crates.io:cwd-subdao-pre-propose-single',
   NeutronCwdSubdaoTimelockSingle = 'crates.io:cwd-subdao-timelock-single',
   NeutronCwdPreProposeSingleOverrule = 'crates.io:cwd-pre-propose-single-overrule',
+  // https://github.com/oraichain/cw20-staking/tree/master/contracts/proxy-snapshot
+  OraichainCw20StakingProxySnapshot = 'cw20-staking-proxy-snapshot',
+  ValenceAccount = 'crates.io:valence-account',
 }
 
 export const NEUTRON_SUBDAO_CORE_CONTRACT_NAMES = [
@@ -39,6 +45,9 @@ export const DAO_VOTING_CW20_STAKED_CONTRACT_NAMES = [
   // V2+
   'crates.io:cwd-voting-cw20-staked',
   'crates.io:dao-voting-cw20-staked',
+
+  // Secret
+  'crates.io:dao-voting-snip20-staked',
 ]
 
 export const DAO_VOTING_CW4_CONTRACT_NAMES = [
@@ -52,6 +61,17 @@ export const DAO_VOTING_CW4_CONTRACT_NAMES = [
 export const DAO_VOTING_CW721_STAKED_CONTRACT_NAMES = [
   // V2+
   'crates.io:dao-voting-cw721-staked',
+
+  // Secret
+  'crates.io:dao-voting-snip721-staked',
+]
+
+export const DAO_VOTING_ONFT_STAKED_CONTRACT_NAMES = [
+  'crates.io:dao-voting-onft-staked',
+]
+
+export const DAO_VOTING_SG_COMMUNITY_NFT_CONTRACT_NAMES = [
+  'crates.io:dao-voting-sg-community-nft',
 ]
 
 export const DAO_VOTING_TOKEN_STAKED_CONTRACT_NAMES = [

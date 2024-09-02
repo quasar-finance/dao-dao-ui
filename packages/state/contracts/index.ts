@@ -1,4 +1,8 @@
 export { Cw1WhitelistClient, Cw1WhitelistQueryClient } from './Cw1Whitelist'
+export {
+  Cw3FlexMultisigClient,
+  Cw3FlexMultisigQueryClient,
+} from './Cw3FlexMultisig'
 export { Cw4GroupClient, Cw4GroupQueryClient } from './Cw4Group'
 export { Cw20BaseClient, Cw20BaseQueryClient } from './Cw20Base'
 export { Cw20StakeClient, Cw20StakeQueryClient } from './Cw20Stake'
@@ -19,7 +23,7 @@ export {
 } from './CwTokenfactoryIssuer'
 export { CwTokenSwapClient, CwTokenSwapQueryClient } from './CwTokenSwap'
 export { CwVestingClient, CwVestingQueryClient } from './CwVesting'
-export { DaoCoreV2Client, DaoCoreV2QueryClient } from './DaoCore.v2'
+export { DaoDaoCoreClient, DaoDaoCoreQueryClient } from './DaoDaoCore'
 export {
   DaoPreProposeApprovalSingleClient,
   DaoPreProposeApprovalSingleQueryClient,
@@ -63,6 +67,10 @@ export {
   NeutronVotingRegistryQueryClient,
 } from './NeutronVotingRegistry'
 export {
+  OraichainCw20StakingClient,
+  OraichainCw20StakingQueryClient,
+} from './OraichainCw20Staking'
+export {
   NeutronCwdPreProposeSingleOverruleClient,
   NeutronCwdPreProposeSingleOverruleQueryClient,
 } from './NeutronCwdPreProposeSingleOverrule'
@@ -80,4 +88,59 @@ export {
 } from './PolytoneListener'
 export { PolytoneNoteClient, PolytoneNoteQueryClient } from './PolytoneNote'
 export { PolytoneProxyClient, PolytoneProxyQueryClient } from './PolytoneProxy'
+export { PolytoneVoiceClient, PolytoneVoiceQueryClient } from './PolytoneVoice'
+export { SecretCwAdminFactoryClient } from './SecretCwAdminFactory'
 export { Sg721BaseClient, Sg721BaseQueryClient } from './Sg721Base'
+export {
+  ValenceRebalancerClient,
+  ValenceRebalancerQueryClient,
+} from './ValenceRebalancer'
+export {
+  SecretDaoDaoCoreClient,
+  SecretDaoDaoCoreQueryClient,
+} from './SecretDaoDaoCore'
+export {
+  SecretDaoPreProposeSingleClient,
+  SecretDaoPreProposeSingleQueryClient,
+} from './SecretDaoPreProposeSingle'
+export {
+  SecretDaoProposalSingleClient,
+  SecretDaoProposalSingleQueryClient,
+} from './SecretDaoProposalSingle'
+export {
+  SecretDaoProposalMultipleClient,
+  SecretDaoProposalMultipleQueryClient,
+} from './SecretDaoProposalMultiple'
+export {
+  SecretDaoPreProposeMultipleClient,
+  SecretDaoPreProposeMultipleQueryClient,
+} from './SecretDaoPreProposeMultiple'
+export {
+  DaoVotingCw721StakedClient,
+  DaoVotingCw721StakedQueryClient,
+} from './DaoVotingCw721Staked'
+export { SecretDaoVotingCw4QueryClient } from './SecretDaoVotingCw4'
+export {
+  SecretDaoVotingTokenStakedClient,
+  SecretDaoVotingTokenStakedQueryClient,
+} from './SecretDaoVotingTokenStaked'
+export {
+  SecretDaoVotingSnip721StakedClient,
+  SecretDaoVotingSnip721StakedQueryClient,
+} from './SecretDaoVotingSnip721Staked'
+export {
+  SecretDaoPreProposeApprovalSingleClient,
+  SecretDaoPreProposeApprovalSingleQueryClient,
+} from './SecretDaoPreProposeApprovalSingle'
+export {
+  SecretDaoVotingSnip20StakedClient,
+  SecretDaoVotingSnip20StakedQueryClient,
+} from './SecretDaoVotingSnip20Staked'
+export {
+  DaoVotingOnftStakedClient,
+  DaoVotingOnftStakedQueryClient,
+} from './DaoVotingOnftStaked'
+export {
+  DaoVotingSgCommunityNftClient,
+  DaoVotingSgCommunityNftQueryClient,
+} from './DaoVotingSgCommunityNft'

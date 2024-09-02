@@ -1,124 +1,335 @@
 import { CosmWasmClient } from '@cosmjs/cosmwasm-stargate'
-import { StargateClient, logs } from '@cosmjs/stargate'
+import { Event, StargateClient } from '@cosmjs/stargate'
 import {
+  Comet38Client,
   HttpBatchClient,
   Tendermint34Client,
   Tendermint37Client,
+  connectComet,
 } from '@cosmjs/tendermint-rpc'
 
-type ChainClientRoutes<T> = {
-  [rpcEndpoint: string]: T
+import {
+  OmniFlix,
+  bitsong,
+  cosmos,
+  cosmwasm,
+  feemarket,
+  ibc,
+  interchain_security,
+  juno,
+  kujira,
+  neutron,
+  noble,
+  osmosis,
+} from '@dao-dao/types/protobuf'
+
+import { getLcdForChainId, getRpcForChainId, isSecretNetwork } from './chain'
+import { retry } from './network'
+import { SecretCosmWasmClient } from './secret'
+
+type HandleConnect<T, P> = (chainId: string, ...args: P[]) => Promise<T>
+type ChainClientRouterOptions<T, P> = {
+  /**
+   * The connection handler that returns the client for a given chain ID.
+   */
+  handleConnect: HandleConnect<T, P>
 }
 
-type HandleConnect<T> = (rpcEndpoint: string) => Promise<T>
-
 /*
- * This is a workaround for `@cosmjs` clients to avoid connecting to the chain more than once.
+ * This is a client wrapper that preserves singletons of connected clients for
+ * many chains.
  *
  * @example
+ * ```
  * export const stargateClientRouter = new ChainClientRouter({
- *   handleConnect: (rpcEndpoint: string) => StargateClient.connect(rpcEndpoint),
+ *   handleConnect: (chainId: string) => StargateClient.connect(
+ *     getRpcForChainId(chainId)
+ *   ),
  * })
  *
- * const client = await stargateClientRouter.connect(RPC_ENDPOINT);
+ * const client = await stargateClientRouter.connect(CHAIN_ID);
  *
  * const queryResponse = await client.queryContractSmart(...);
- *  */
-class ChainClientRouter<T> {
-  private readonly handleConnect: HandleConnect<T>
-  private instances: ChainClientRoutes<T> = {}
+ * ```
+ */
+class ChainClientRouter<T, P> {
+  private readonly handleConnect: HandleConnect<T, P>
+  private instances: Record<string, T> = {}
 
-  constructor({ handleConnect }: { handleConnect: HandleConnect<T> }) {
+  constructor({ handleConnect }: ChainClientRouterOptions<T, P>) {
     this.handleConnect = handleConnect
   }
 
   /*
-   * Connect to the chain and return the client
-   * or return an existing instance of the client.
-   *  */
-  async connect(rpcEndpoint: string) {
-    if (!this.getClientInstance(rpcEndpoint)) {
-      const instance = await this.handleConnect(rpcEndpoint)
-      this.setClientInstance(rpcEndpoint, instance)
+   * Connect to the chain and return the client or return an existing instance
+   * of the client.
+   */
+  async connect(chainId: string, ...args: P[]): Promise<T> {
+    if (!this.instances[chainId]) {
+      const instance = await this.handleConnect(chainId, ...args)
+      this.instances[chainId] = instance
     }
 
-    return this.getClientInstance(rpcEndpoint)
-  }
-
-  private getClientInstance(rpcEndpoint: string) {
-    return this.instances[rpcEndpoint]
-  }
-
-  private setClientInstance(rpcEndpoint: string, client: T) {
-    this.instances[rpcEndpoint] = client
+    return this.instances[chainId]
   }
 }
 
-/*
- * Router for connecting to `CosmWasmClient`.
- *  */
+/**
+ * Router for connecting to CosmWasmClient for the appropriate chain.
+ *
+ * Uses SecretCosmWasmClient for Secret Network mainnet and testnet.
+ *
+ * Defaults to CosmWasmClient for all other chains.
+ */
 export const cosmWasmClientRouter = new ChainClientRouter({
-  handleConnect: async (rpcEndpoint: string) => {
-    const httpClient = new HttpBatchClient(rpcEndpoint)
-    const tmClient = await (
-      (
-        await connectTendermintClient(rpcEndpoint)
-      ).constructor as typeof Tendermint34Client | typeof Tendermint37Client
-    ).create(httpClient)
+  handleConnect: async (chainId: string) =>
+    retry(10, async (attempt) => {
+      const rpc = getRpcForChainId(chainId, attempt - 1)
 
-    return await CosmWasmClient.create(tmClient)
-  },
+      const httpClient = new HttpBatchClient(rpc)
+      const tmClient = await (
+        (
+          await connectComet(rpc)
+        ).constructor as
+          | typeof Tendermint34Client
+          | typeof Tendermint37Client
+          | typeof Comet38Client
+      ).create(httpClient)
+
+      return isSecretNetwork(chainId)
+        ? await SecretCosmWasmClient.secretCreate(tmClient, {
+            chainId,
+            url: getLcdForChainId(chainId, attempt - 1),
+          })
+        : await CosmWasmClient.create(tmClient)
+    }),
+})
+
+/**
+ * Router for connecting to SecretCosmWasmClient.
+ */
+export const secretCosmWasmClientRouter = new ChainClientRouter({
+  handleConnect: async (chainId: string) =>
+    retry(10, async (attempt) => {
+      const rpc = getRpcForChainId(chainId, attempt - 1)
+
+      const httpClient = new HttpBatchClient(rpc)
+      const tmClient = await (
+        (
+          await connectComet(rpc)
+        ).constructor as
+          | typeof Tendermint34Client
+          | typeof Tendermint37Client
+          | typeof Comet38Client
+      ).create(httpClient)
+
+      return await SecretCosmWasmClient.secretCreate(tmClient, {
+        chainId,
+        url: getLcdForChainId(chainId, attempt - 1),
+      })
+    }),
 })
 
 /*
  * Router for connecting to `StargateClient`.
- *  */
+ */
 export const stargateClientRouter = new ChainClientRouter({
-  handleConnect: async (rpcEndpoint: string) => {
-    const httpClient = new HttpBatchClient(rpcEndpoint)
-    const tmClient = await (
-      (
-        await connectTendermintClient(rpcEndpoint)
-      ).constructor as typeof Tendermint34Client | typeof Tendermint37Client
-    ).create(httpClient)
+  handleConnect: async (chainId: string) =>
+    retry(10, async (attempt) => {
+      const rpc = getRpcForChainId(chainId, attempt - 1)
 
-    return await StargateClient.create(tmClient, {})
-  },
+      const httpClient = new HttpBatchClient(rpc)
+      const tmClient = await (
+        (
+          await connectComet(rpc)
+        ).constructor as
+          | typeof Tendermint34Client
+          | typeof Tendermint37Client
+          | typeof Comet38Client
+      ).create(httpClient)
+
+      return await StargateClient.create(tmClient)
+    }),
 })
 
-// In response logs from a transaction with a wasm event, gets the attribute key
-// for a given contract address.
+/*
+ * Factory function to make routers that connect to an RPC client with specific
+ * protobufs loaded.
+ */
+const makeProtoRpcClientRouter = <T, K extends keyof T>(
+  protoBundle: {
+    ClientFactory: {
+      createRPCQueryClient: ({
+        rpcEndpoint,
+      }: {
+        rpcEndpoint: string
+      }) => Promise<T>
+    }
+  },
+  key: K
+): ChainClientRouter<T[K], never> =>
+  new ChainClientRouter({
+    handleConnect: async (chainId: string) =>
+      retry(
+        10,
+        async (attempt) =>
+          (
+            await protoBundle.ClientFactory.createRPCQueryClient({
+              rpcEndpoint: getRpcForChainId(chainId, attempt - 1),
+            })
+          )[key]
+      ),
+  })
+
+/*
+ * Router for connecting to an RPC client with Cosmos protobufs.
+ */
+export const cosmosProtoRpcClientRouter = makeProtoRpcClientRouter(
+  cosmos,
+  'cosmos'
+)
+
+/*
+ * Router for connecting to an RPC client with IBC protobufs.
+ */
+export const ibcProtoRpcClientRouter = makeProtoRpcClientRouter(ibc, 'ibc')
+
+/*
+ * Router for connecting to an RPC client with interchain security protobufs.
+ */
+export const interchainSecurityProtoRpcClientRouter = makeProtoRpcClientRouter(
+  interchain_security,
+  'interchain_security'
+)
+
+/*
+ * Router for connecting to an RPC client with CosmWasm protobufs.
+ */
+export const cosmwasmProtoRpcClientRouter = makeProtoRpcClientRouter(
+  cosmwasm,
+  'cosmwasm'
+)
+
+/*
+ * Router for connecting to an RPC client with Osmosis protobufs.
+ */
+export const osmosisProtoRpcClientRouter = makeProtoRpcClientRouter(
+  osmosis,
+  'osmosis'
+)
+
+/*
+ * Router for connecting to an RPC client with Noble protobufs.
+ */
+export const nobleProtoRpcClientRouter = makeProtoRpcClientRouter(
+  noble,
+  'noble'
+)
+
+/*
+ * Router for connecting to an RPC client with Neutron protobufs.
+ */
+export const neutronProtoRpcClientRouter = makeProtoRpcClientRouter(
+  neutron,
+  'neutron'
+)
+
+/*
+ * Router for connecting to an RPC client with Juno protobufs.
+ */
+export const junoProtoRpcClientRouter = makeProtoRpcClientRouter(juno, 'juno')
+
+/*
+ * Router for connecting to an RPC client with Kujira protobufs.
+ */
+export const kujiraProtoRpcClientRouter = makeProtoRpcClientRouter(
+  kujira,
+  'kujira'
+)
+
+/*
+ * Router for connecting to an RPC client with OmniFlix protobufs.
+ */
+export const omniflixProtoRpcClientRouter = makeProtoRpcClientRouter(
+  OmniFlix,
+  'OmniFlix'
+)
+
+/*
+ * Router for connecting to an RPC client with feemarket protobufs.
+ */
+export const feemarketProtoRpcClientRouter = makeProtoRpcClientRouter(
+  feemarket,
+  'feemarket'
+)
+
+/*
+ * Router for connecting to an RPC client with BitSong protobufs.
+ */
+export const bitsongProtoRpcClientRouter = new ChainClientRouter({
+  handleConnect: async (chainId: string) =>
+    retry(
+      10,
+      async (attempt) =>
+        (
+          await bitsong.ClientFactory.createRPCQueryClient({
+            rpcEndpoint: getRpcForChainId(chainId, attempt - 1),
+          })
+        ).bitsong
+    ),
+})
+
+/**
+ * Get CosmWasmClient for the appropriate chain.
+ *
+ * Uses SecretCosmWasmClient for Secret Network mainnet and testnet.
+ *
+ * Defaults to CosmWasmClient for all other chains.
+ */
+export const getCosmWasmClientForChainId = async (
+  chainId: string
+): Promise<CosmWasmClient> =>
+  isSecretNetwork(chainId)
+    ? await secretCosmWasmClientRouter.connect(chainId)
+    : await cosmWasmClientRouter.connect(chainId)
+
+/**
+ * In response events from a transaction with a wasm event, gets the attribute
+ * key for a given contract address.
+ */
 export const findWasmAttributeValue = (
-  logs: readonly logs.Log[],
+  chainId: string,
+  events: readonly Event[],
   contractAddress: string,
   attributeKey: string
 ): string | undefined => {
-  const wasmEvent = logs
-    .flatMap((log) => log.events)
-    .find(
-      ({ type, attributes }) =>
-        type === 'wasm' &&
-        attributes.some(
-          ({ key, value }) =>
-            key === '_contract_address' && value === contractAddress
-        ) &&
-        attributes.some(({ key }) => key === attributeKey)
-    )
+  const wasmEvent = events.find(
+    ({ type, attributes }) =>
+      type === 'wasm' &&
+      attributes.some(
+        ({ key, value }) =>
+          key ===
+            (isSecretNetwork(chainId)
+              ? 'contract_address'
+              : '_contract_address') && value === contractAddress
+      ) &&
+      attributes.some(({ key }) => key === attributeKey)
+  )
   return wasmEvent?.attributes.find(({ key }) => key === attributeKey)!.value
 }
 
-// Connect the correct tendermint client based on the node's version.
-export const connectTendermintClient = async (endpoint: string) => {
-  // Tendermint/CometBFT 0.34/0.37 auto-detection. Starting with 0.37 we seem to
-  // get reliable versions again 🎉 Using 0.34 as the fallback.
-  let tmClient
-  const tm37Client = await Tendermint37Client.connect(endpoint)
-  const version = (await tm37Client.status()).nodeInfo.version
-  if (version.startsWith('0.37.')) {
-    tmClient = tm37Client
-  } else {
-    tm37Client.disconnect()
-    tmClient = await Tendermint34Client.connect(endpoint)
-  }
-  return tmClient
-}
+/**
+ * In response events from a transaction, gets the first attribute value for an
+ * attribute key in the first event of a given type.
+ */
+export const findEventsAttributeValue = (
+  events: readonly Event[],
+  eventType: string,
+  attributeKey: string
+): string | undefined =>
+  events.flatMap(
+    ({ type, attributes }) =>
+      (type === eventType &&
+        attributes.find(({ key }) => key === attributeKey)) ||
+      []
+  )[0]?.value

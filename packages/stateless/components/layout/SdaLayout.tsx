@@ -13,9 +13,13 @@ import { ErrorBoundary } from '../error/ErrorBoundary'
 import { useAppContext } from './AppContext'
 import { SdaNavigation } from './SdaNavigation'
 
-export const SdaLayout = ({ navigationProps, children }: SdaLayoutProps) => {
-  const router = useRouter()
-  const { responsiveNavigation, setPageHeaderRef } = useAppContext()
+export const SdaLayout = ({
+  navigationProps,
+  PageHeader,
+  children,
+}: SdaLayoutProps) => {
+  const { pathname } = useRouter()
+  const { responsiveNavigation, pageHeaderRef } = useAppContext()
 
   const scrollableContainerRef = useRef<HTMLDivElement>(null)
 
@@ -34,7 +38,7 @@ export const SdaLayout = ({ navigationProps, children }: SdaLayoutProps) => {
 
     // Only toggle on route change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [router.asPath])
+  }, [pathname])
 
   return (
     <div className="relative z-[1] mx-auto flex h-full w-full max-w-7xl flex-row items-stretch overflow-hidden pt-safe">
@@ -51,7 +55,9 @@ export const SdaLayout = ({ navigationProps, children }: SdaLayoutProps) => {
             : 'opacity-100'
         )}
       >
-        <div className="shrink-0 px-6" ref={setPageHeaderRef}></div>
+        <div className="shrink-0 px-6" ref={pageHeaderRef}>
+          <PageHeader />
+        </div>
 
         <div
           className={clsx(

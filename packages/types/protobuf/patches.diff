@@ -1,0 +1,262 @@
+diff --git b/packages/types/protobuf/codegen/cosmos/authz/v1beta1/tx.ts a/packages/types/protobuf/codegen/cosmos/authz/v1beta1/tx.ts
+index 1dc291f1a..a90db9057 100644
+--- b/packages/types/protobuf/codegen/cosmos/authz/v1beta1/tx.ts
++++ a/packages/types/protobuf/codegen/cosmos/authz/v1beta1/tx.ts
+@@ -1,4 +1,5 @@
+ //@ts-nocheck
++import { aminoToRawProtobufMsg, rawProtobufMsgToAmino } from '../../../../utils'
+ import { Grant, GrantAmino, GrantSDKType } from "./authz";
+ import { Any, AnyProtoMsg, AnyAmino, AnySDKType } from "../../../google/protobuf/any";
+ import { BinaryReader, BinaryWriter } from "../../../binary";
+@@ -371,14 +372,14 @@ export const MsgExec = {
+     if (object.grantee !== undefined && object.grantee !== null) {
+       message.grantee = object.grantee;
+     }
+-    message.msgs = object.msgs?.map(e => Cosmos_basev1beta1Msg_FromAmino(e)) || [];
++    message.msgs = object.msgs?.map(e => aminoToRawProtobufMsg(e)) || [];
+     return message;
+   },
+   toAmino(message: MsgExec, useInterfaces: boolean = false): MsgExecAmino {
+     const obj: any = {};
+     obj.grantee = message.grantee === "" ? undefined : message.grantee;
+     if (message.msgs) {
+-      obj.msgs = message.msgs.map(e => e ? Cosmos_basev1beta1Msg_ToAmino((e as Any), useInterfaces) : undefined);
++      obj.msgs = message.msgs.map(e => e ? rawProtobufMsgToAmino((e as Any), useInterfaces) : undefined);
+     } else {
+       obj.msgs = message.msgs;
+     }
+diff --git b/packages/types/protobuf/codegen/cosmos/gov/v1/tx.ts a/packages/types/protobuf/codegen/cosmos/gov/v1/tx.ts
+index 71df399d6..4ebbe5742 100644
+--- b/packages/types/protobuf/codegen/cosmos/gov/v1/tx.ts
++++ a/packages/types/protobuf/codegen/cosmos/gov/v1/tx.ts
+@@ -1,4 +1,5 @@
+ //@ts-nocheck
++import { aminoToRawProtobufMsg, rawProtobufMsgToAmino } from "../../../../utils";
+ import { Any, AnyProtoMsg, AnyAmino, AnySDKType } from "../../../google/protobuf/any";
+ import { Coin, CoinAmino, CoinSDKType } from "../../base/v1beta1/coin";
+ import { VoteOption, WeightedVoteOption, WeightedVoteOptionAmino, WeightedVoteOptionSDKType, Params, ParamsAmino, ParamsSDKType } from "./gov";
+@@ -578,7 +579,8 @@ export const MsgSubmitProposal = {
+   },
+   fromAmino(object: MsgSubmitProposalAmino): MsgSubmitProposal {
+     const message = createBaseMsgSubmitProposal();
+-    message.messages = object.messages?.map(e => Any.fromAmino(e)) || [];
++    message.messages =
++      object.messages?.map(e => aminoToRawProtobufMsg(e)) || [];
+     message.initialDeposit = object.initial_deposit?.map(e => Coin.fromAmino(e)) || [];
+     if (object.proposer !== undefined && object.proposer !== null) {
+       message.proposer = object.proposer;
+@@ -599,10 +601,8 @@ export const MsgSubmitProposal = {
+   },
+   toAmino(message: MsgSubmitProposal, useInterfaces: boolean = false): MsgSubmitProposalAmino {
+     const obj: any = {};
+-    if (message.messages) {
+-      obj.messages = message.messages.map(e => e ? Any.toAmino(e, useInterfaces) : undefined);
+-    } else {
+-      obj.messages = message.messages;
++    if (message.messages.length) {
++      obj.messages = message.messages.map(e => e ? rawProtobufMsgToAmino(e, false) : undefined);
+     }
+     if (message.initialDeposit) {
+       obj.initial_deposit = message.initialDeposit.map(e => e ? Coin.toAmino(e, useInterfaces) : undefined);
+diff --git b/packages/types/protobuf/codegen/cosmwasm/wasm/v1/types.ts a/packages/types/protobuf/codegen/cosmwasm/wasm/v1/types.ts
+index 2a9a61c38..2643bcdc4 100644
+--- b/packages/types/protobuf/codegen/cosmwasm/wasm/v1/types.ts
++++ a/packages/types/protobuf/codegen/cosmwasm/wasm/v1/types.ts
+@@ -474,18 +474,16 @@ export const AccessConfig = {
+   fromAmino(object: AccessConfigAmino): AccessConfig {
+     const message = createBaseAccessConfig();
+     if (object.permission !== undefined && object.permission !== null) {
+-      message.permission = object.permission;
++      message.permission = accessTypeFromJSON(object.permission);
+     }
+     message.addresses = object.addresses?.map(e => e) || [];
+     return message;
+   },
+   toAmino(message: AccessConfig, useInterfaces: boolean = false): AccessConfigAmino {
+     const obj: any = {};
+-    obj.permission = message.permission === 0 ? undefined : message.permission;
+-    if (message.addresses) {
++    obj.permission = accessTypeToJSON(message.permission);
++    if (message.addresses.length) {
+       obj.addresses = message.addresses.map(e => e);
+-    } else {
+-      obj.addresses = message.addresses;
+     }
+     return obj;
+   },
+@@ -560,14 +558,14 @@ export const Params = {
+       message.codeUploadAccess = AccessConfig.fromAmino(object.code_upload_access);
+     }
+     if (object.instantiate_default_permission !== undefined && object.instantiate_default_permission !== null) {
+-      message.instantiateDefaultPermission = object.instantiate_default_permission;
++      message.instantiateDefaultPermission = accessTypeFromJSON(object.instantiate_default_permission);
+     }
+     return message;
+   },
+   toAmino(message: Params, useInterfaces: boolean = false): ParamsAmino {
+     const obj: any = {};
+     obj.code_upload_access = message.codeUploadAccess ? AccessConfig.toAmino(message.codeUploadAccess, useInterfaces) : AccessConfig.toAmino(AccessConfig.fromPartial({}));
+-    obj.instantiate_default_permission = message.instantiateDefaultPermission === 0 ? undefined : message.instantiateDefaultPermission;
++    obj.instantiate_default_permission = accessTypeToJSON(message.instantiateDefaultPermission);
+     return obj;
+   },
+   fromAminoMsg(object: ParamsAminoMsg): Params {
+diff --git b/packages/types/protobuf/codegen/neutron/client.ts a/packages/types/protobuf/codegen/neutron/client.ts
+index 1caf8781d..9d864d753 100644
+--- b/packages/types/protobuf/codegen/neutron/client.ts
++++ a/packages/types/protobuf/codegen/neutron/client.ts
+@@ -7,21 +7,24 @@ import * as neutronFeeburnerTxRegistry from "./feeburner/tx.registry";
+ import * as neutronFeerefunderTxRegistry from "./feerefunder/tx.registry";
+ import * as neutronInterchainqueriesTxRegistry from "./interchainqueries/tx.registry";
+ import * as neutronInterchaintxsV1TxRegistry from "./interchaintxs/v1/tx.registry";
++import * as neutronTransferV1TxRegistry from "./transfer/v1/tx.registry";
+ import * as neutronCronTxAmino from "./cron/tx.amino";
+ import * as neutronDexTxAmino from "./dex/tx.amino";
+ import * as neutronFeeburnerTxAmino from "./feeburner/tx.amino";
+ import * as neutronFeerefunderTxAmino from "./feerefunder/tx.amino";
+ import * as neutronInterchainqueriesTxAmino from "./interchainqueries/tx.amino";
+ import * as neutronInterchaintxsV1TxAmino from "./interchaintxs/v1/tx.amino";
++import * as neutronTransferV1TxAmino from "./transfer/v1/tx.amino";
+ export const neutronAminoConverters = {
+   ...neutronCronTxAmino.AminoConverter,
+   ...neutronDexTxAmino.AminoConverter,
+   ...neutronFeeburnerTxAmino.AminoConverter,
+   ...neutronFeerefunderTxAmino.AminoConverter,
+   ...neutronInterchainqueriesTxAmino.AminoConverter,
+-  ...neutronInterchaintxsV1TxAmino.AminoConverter
++  ...neutronInterchaintxsV1TxAmino.AminoConverter,
++  ...neutronTransferV1TxAmino.AminoConverter,
+ };
+-export const neutronProtoRegistry: ReadonlyArray<[string, GeneratedType]> = [...neutronCronTxRegistry.registry, ...neutronDexTxRegistry.registry, ...neutronFeeburnerTxRegistry.registry, ...neutronFeerefunderTxRegistry.registry, ...neutronInterchainqueriesTxRegistry.registry, ...neutronInterchaintxsV1TxRegistry.registry];
++export const neutronProtoRegistry: ReadonlyArray<[string, GeneratedType]> = [...neutronCronTxRegistry.registry, ...neutronDexTxRegistry.registry, ...neutronFeeburnerTxRegistry.registry, ...neutronFeerefunderTxRegistry.registry, ...neutronInterchainqueriesTxRegistry.registry, ...neutronInterchaintxsV1TxRegistry.registry, ...neutronTransferV1TxRegistry.registry];
+ export const getSigningNeutronClientOptions = ({
+   defaultTypes = defaultRegistryTypes
+ }: {
+diff --git b/packages/types/protobuf/codegen/osmosis/poolmanager/v1beta1/module_route.ts a/packages/types/protobuf/codegen/osmosis/poolmanager/v1beta1/module_route.ts
+index a644c0f74..9bce95dea 100644
+--- b/packages/types/protobuf/codegen/osmosis/poolmanager/v1beta1/module_route.ts
++++ a/packages/types/protobuf/codegen/osmosis/poolmanager/v1beta1/module_route.ts
+@@ -153,7 +153,7 @@ export const ModuleRoute = {
+   toAmino(message: ModuleRoute, useInterfaces: boolean = false): ModuleRouteAmino {
+     const obj: any = {};
+     obj.pool_type = message.poolType === 0 ? undefined : message.poolType;
+-    obj.pool_id = message.poolId !== BigInt(0) ? message.poolId.toString() : undefined;
++    obj.pool_id = message.poolId !== BigInt(0) ? message.poolId?.toString() : undefined;
+     return obj;
+   },
+   fromAminoMsg(object: ModuleRouteAminoMsg): ModuleRoute {
+diff --git b/packages/types/protobuf/codegen/osmosis/tokenfactory/v1beta1/params.ts a/packages/types/protobuf/codegen/osmosis/tokenfactory/v1beta1/params.ts
+index 213d94f0e..55b9e2ee2 100644
+--- b/packages/types/protobuf/codegen/osmosis/tokenfactory/v1beta1/params.ts
++++ a/packages/types/protobuf/codegen/osmosis/tokenfactory/v1beta1/params.ts
+@@ -103,7 +103,7 @@ export const Params = {
+     } else {
+       obj.denom_creation_fee = message.denomCreationFee;
+     }
+-    obj.denom_creation_gas_consume = message.denomCreationGasConsume !== BigInt(0) ? message.denomCreationGasConsume.toString() : undefined;
++    obj.denom_creation_gas_consume = message.denomCreationGasConsume !== BigInt(0) ? message.denomCreationGasConsume?.toString() : undefined;
+     return obj;
+   },
+   fromAminoMsg(object: ParamsAminoMsg): Params {
+diff --git b/packages/types/protobuf/codegen/regen/data/v1/tx.ts a/packages/types/protobuf/codegen/regen/data/v1/tx.ts
+index eb4e14ba3..af83becfe 100644
+--- b/packages/types/protobuf/codegen/regen/data/v1/tx.ts
++++ a/packages/types/protobuf/codegen/regen/data/v1/tx.ts
+@@ -1,5 +1,5 @@
+ //@ts-nocheck
+-import { ContentHash, ContentHashAmino, ContentHashSDKType, ContentHash_Graph } from "./types";
++import { ContentHash, ContentHashAmino, ContentHashSDKType, ContentHash_Graph, ContentHash_GraphAmino, ContentHash_GraphSDKType } from "./types";
+ import { Timestamp } from "../../../google/protobuf/timestamp";
+ import { BinaryReader, BinaryWriter } from "../../../binary";
+ import { toTimestamp, fromTimestamp } from "../../../helpers";
+diff --git b/packages/types/protobuf/codegen/regen/data/v2/tx.ts a/packages/types/protobuf/codegen/regen/data/v2/tx.ts
+index 4199e50b5..fd7785125 100644
+--- b/packages/types/protobuf/codegen/regen/data/v2/tx.ts
++++ a/packages/types/protobuf/codegen/regen/data/v2/tx.ts
+@@ -1,5 +1,5 @@
+ //@ts-nocheck
+-import { ContentHash, ContentHashAmino, ContentHashSDKType, ContentHash_Graph } from "./types";
++import { ContentHash, ContentHashAmino, ContentHashSDKType, ContentHash_Graph, ContentHash_GraphAmino, ContentHash_GraphSDKType } from "./types";
+ import { Timestamp } from "../../../google/protobuf/timestamp";
+ import { BinaryReader, BinaryWriter } from "../../../binary";
+ import { toTimestamp, fromTimestamp } from "../../../helpers";
+diff --git b/packages/types/protobuf/codegen/secret/compute/v1beta1/query.rpc.Query.ts a/packages/types/protobuf/codegen/secret/compute/v1beta1/query.rpc.Query.ts
+index a1a896a5e..264b5385f 100644
+--- b/packages/types/protobuf/codegen/secret/compute/v1beta1/query.rpc.Query.ts
++++ a/packages/types/protobuf/codegen/secret/compute/v1beta1/query.rpc.Query.ts
+@@ -14,7 +14,7 @@ export interface Query {
+   /** Query a specific contract code by id */
+   code(request: QueryByCodeIdRequest): Promise<QueryCodeResponse>;
+   /** Query all contract codes on-chain */
+-  codes(request?: google.protobuf.Empty): Promise<QueryCodesResponse>;
++  codes(request?: Empty): Promise<QueryCodesResponse>;
+   /** Query code hash by contract address */
+   codeHashByContractAddress(request: QueryByContractAddressRequest): Promise<QueryCodeHashResponse>;
+   /** Query code hash by code id */
+@@ -61,8 +61,8 @@ export class QueryClientImpl implements Query {
+     const promise = this.rpc.request("secret.compute.v1beta1.Query", "Code", data);
+     return promise.then(data => QueryCodeResponse.decode(new BinaryReader(data), undefined, useInterfaces));
+   }
+-  codes(request: google.protobuf.Empty = {}, useInterfaces: boolean = true): Promise<QueryCodesResponse> {
+-    const data = google.protobuf.Empty.encode(request).finish();
++  codes(request: Empty = {}, useInterfaces: boolean = true): Promise<QueryCodesResponse> {
++    const data = Empty.encode(request).finish();
+     const promise = this.rpc.request("secret.compute.v1beta1.Query", "Codes", data);
+     return promise.then(data => QueryCodesResponse.decode(new BinaryReader(data), undefined, useInterfaces));
+   }
+@@ -108,7 +108,7 @@ export const createRpcQueryExtension = (base: QueryClient) => {
+     code(request: QueryByCodeIdRequest, useInterfaces: boolean = true): Promise<QueryCodeResponse> {
+       return queryService.code(request, useInterfaces);
+     },
+-    codes(request?: google.protobuf.Empty, useInterfaces: boolean = true): Promise<QueryCodesResponse> {
++    codes(request?: Empty, useInterfaces: boolean = true): Promise<QueryCodesResponse> {
+       return queryService.codes(request, useInterfaces);
+     },
+     codeHashByContractAddress(request: QueryByContractAddressRequest, useInterfaces: boolean = true): Promise<QueryCodeHashResponse> {
+diff --git b/packages/types/protobuf/codegen/secret/registration/v1beta1/query.rpc.Query.ts a/packages/types/protobuf/codegen/secret/registration/v1beta1/query.rpc.Query.ts
+index cefd5a01c..9617817a2 100644
+--- b/packages/types/protobuf/codegen/secret/registration/v1beta1/query.rpc.Query.ts
++++ a/packages/types/protobuf/codegen/secret/registration/v1beta1/query.rpc.Query.ts
+@@ -7,9 +7,9 @@ import { QueryEncryptedSeedRequest, QueryEncryptedSeedResponse } from "./query";
+ /** Query provides defines the gRPC querier service */
+ export interface Query {
+   /** Returns the key used for transactions */
+-  txKey(request?: google.protobuf.Empty): Promise<Key>;
++  txKey(request?: Empty): Promise<Key>;
+   /** Returns the key used for registration */
+-  registrationKey(request?: google.protobuf.Empty): Promise<Key>;
++  registrationKey(request?: Empty): Promise<Key>;
+   /** Returns the encrypted seed for a registered node by public key */
+   encryptedSeed(request: QueryEncryptedSeedRequest): Promise<QueryEncryptedSeedResponse>;
+ }
+@@ -21,13 +21,13 @@ export class QueryClientImpl implements Query {
+     this.registrationKey = this.registrationKey.bind(this);
+     this.encryptedSeed = this.encryptedSeed.bind(this);
+   }
+-  txKey(request: google.protobuf.Empty = {}, useInterfaces: boolean = true): Promise<Key> {
+-    const data = google.protobuf.Empty.encode(request).finish();
++  txKey(request: Empty = {}, useInterfaces: boolean = true): Promise<Key> {
++    const data = Empty.encode(request).finish();
+     const promise = this.rpc.request("secret.registration.v1beta1.Query", "TxKey", data);
+     return promise.then(data => Key.decode(new BinaryReader(data), undefined, useInterfaces));
+   }
+-  registrationKey(request: google.protobuf.Empty = {}, useInterfaces: boolean = true): Promise<Key> {
+-    const data = google.protobuf.Empty.encode(request).finish();
++  registrationKey(request: Empty = {}, useInterfaces: boolean = true): Promise<Key> {
++    const data = Empty.encode(request).finish();
+     const promise = this.rpc.request("secret.registration.v1beta1.Query", "RegistrationKey", data);
+     return promise.then(data => Key.decode(new BinaryReader(data), undefined, useInterfaces));
+   }
+@@ -41,10 +41,10 @@ export const createRpcQueryExtension = (base: QueryClient) => {
+   const rpc = createProtobufRpcClient(base);
+   const queryService = new QueryClientImpl(rpc);
+   return {
+-    txKey(request?: google.protobuf.Empty, useInterfaces: boolean = true): Promise<Key> {
++    txKey(request?: Empty, useInterfaces: boolean = true): Promise<Key> {
+       return queryService.txKey(request, useInterfaces);
+     },
+-    registrationKey(request?: google.protobuf.Empty, useInterfaces: boolean = true): Promise<Key> {
++    registrationKey(request?: Empty, useInterfaces: boolean = true): Promise<Key> {
+       return queryService.registrationKey(request, useInterfaces);
+     },
+     encryptedSeed(request: QueryEncryptedSeedRequest, useInterfaces: boolean = true): Promise<QueryEncryptedSeedResponse> {

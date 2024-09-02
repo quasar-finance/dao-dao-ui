@@ -19,22 +19,17 @@ import { Tooltip } from '../tooltip/Tooltip'
 import { DaoImage } from './DaoImage'
 
 export const DaoCard = ({
-  coreAddress,
-  name,
-  description,
-  imageUrl,
-  established,
-  parentDao,
-  tokenSymbol,
-  showingEstimatedUsdValue,
-  tokenDecimals,
+  info: { coreAddress, name, description, imageUrl, created, parentDao },
   lazyData,
+  follow,
+  LinkWrapper,
+  isMember,
   showIsMember = true,
-  className,
+  showingEstimatedUsdValue = true,
+  showParentDao = true,
   onMouseOver,
   onMouseLeave,
-  LinkWrapper,
-  follow,
+  className,
 }: DaoCardProps) => {
   const { t } = useTranslation()
   const { getDaoPath } = useDaoNavHelpers()
@@ -48,9 +43,10 @@ export const DaoCard = ({
       href={getDaoPath(coreAddress)}
       onMouseLeave={onMouseLeave}
       onMouseOver={onMouseOver}
+      prefetch
     >
       <div className="absolute top-0 left-0 flex w-full flex-row items-center justify-between p-2 sm:p-3">
-        {showIsMember && !lazyData.loading && lazyData.data.isMember ? (
+        {showIsMember && isMember ? (
           <Tooltip title={t('info.youAreMember')}>
             <PersonRounded className="!h-4 !w-4 text-icon-secondary" />
           </Tooltip>
@@ -93,13 +89,13 @@ export const DaoCard = ({
           coreAddress={coreAddress}
           daoName={name}
           imageUrl={imageUrl}
-          parentDao={parentDao}
+          parentDao={showParentDao ? parentDao : null}
           size="sm"
         />
         <p className="primary-text mt-2 text-center">{name}</p>
-        {established && (
+        {!!created && (
           <p className="caption-text mt-1 text-center">
-            {formatDate(established)}
+            {formatDate(new Date(created))}
           </p>
         )}
       </div>
@@ -109,7 +105,8 @@ export const DaoCard = ({
           {removeMarkdown(description)}
         </p>
 
-        {(lazyData.loading || !isNaN(lazyData.data.tokenBalance)) && (
+        {(lazyData.loading ||
+          (!lazyData.errored && lazyData.data.tokenWithBalance)) && (
           <div
             className={clsx(
               'caption-text mb-2 flex flex-row items-center gap-2 font-mono',
@@ -120,9 +117,12 @@ export const DaoCard = ({
 
             <TokenAmountDisplay
               amount={
-                lazyData.loading
+                lazyData.loading || !lazyData.data.tokenWithBalance
                   ? { loading: true }
-                  : { loading: false, data: lazyData.data.tokenBalance }
+                  : {
+                      loading: false,
+                      data: Number(lazyData.data.tokenWithBalance.balance),
+                    }
               }
               hideApprox
               {...(showingEstimatedUsdValue
@@ -130,8 +130,14 @@ export const DaoCard = ({
                     estimatedUsdValue: true,
                   }
                 : {
-                    decimals: tokenDecimals,
-                    symbol: tokenSymbol,
+                    decimals:
+                      lazyData.loading || !lazyData.data.tokenWithBalance
+                        ? 0
+                        : lazyData.data.tokenWithBalance.decimals,
+                    symbol:
+                      lazyData.loading || !lazyData.data.tokenWithBalance
+                        ? ''
+                        : lazyData.data.tokenWithBalance.symbol,
                   })}
             />
 
@@ -144,7 +150,7 @@ export const DaoCard = ({
           </div>
         )}
 
-        {(lazyData.loading || !isNaN(lazyData.data.proposalCount)) && (
+        {(lazyData.loading || !lazyData.errored) && (
           <div
             className={clsx(
               'caption-text flex flex-row items-center gap-3 font-mono',

@@ -9,7 +9,7 @@ import {
   UseDefaults,
   UseTransformToCosmos,
 } from '@dao-dao/types/actions'
-import { DAO_WIDGET_ITEM_NAMESPACE } from '@dao-dao/utils'
+import { getWidgetStorageItemKey } from '@dao-dao/utils'
 
 import { RetroactiveCompensationWidget } from '../../../../widgets/widgets/RetroactiveCompensation'
 import { makeManageWidgetsAction } from '../../dao_appearance/ManageWidgets'
@@ -72,8 +72,8 @@ export const makeEnableRetroactiveCompensationAction: ActionMaker = (
     // Do not allow using this action if the DAO already has retroactive
     // compensation enabled.
     hideFromPicker:
-      !!context.info.items[
-        DAO_WIDGET_ITEM_NAMESPACE + RetroactiveCompensationWidget.id
+      !!context.dao.info.items[
+        getWidgetStorageItemKey(RetroactiveCompensationWidget.id)
       ],
   }
 }

@@ -1,4 +1,5 @@
 import { AccountData, StdSignDoc } from '@cosmjs/amino'
+import { fromBech32 } from '@cosmjs/encoding'
 import { DirectSignDoc, SimpleAccount, WalletAccount } from '@cosmos-kit/core'
 import { useIframe } from '@cosmos-kit/react-lite'
 import cloneDeep from 'lodash.clonedeep'
@@ -10,6 +11,7 @@ import { useRecoilState, useSetRecoilState } from 'recoil'
 import useDeepCompareEffect from 'use-deep-compare-effect'
 import { v4 as uuidv4 } from 'uuid'
 
+import { OverrideHandler } from '@dao-dao/cosmiframe'
 import {
   proposalCreatedCardPropsAtom,
   proposalDraftsAtom,
@@ -18,35 +20,38 @@ import {
 import {
   Loader,
   Modal,
+  ProfileImage,
+  ProfileNameDisplayAndEditor,
   AppsTab as StatelessAppsTab,
-  WarningCard,
+  StatusCard,
   useDaoInfoContext,
 } from '@dao-dao/stateless'
 import {
+  AccountType,
   ActionKeyAndData,
   ActionKeyAndDataNoId,
   BaseNewProposalProps,
-  CosmosMsgFor_Empty,
   ProposalDraft,
+  UnifiedCosmosMsg,
+  decodedStargateMsgToCw,
+  getAminoTypes,
+  protobufToCwMsg,
 } from '@dao-dao/types'
+import { TxBody } from '@dao-dao/types/protobuf/codegen/cosmos/tx/v1beta1/tx'
 import {
   DaoProposalSingleAdapterId,
+  SITE_TITLE,
   SITE_URL,
-  aminoTypes,
   decodeMessages,
-  decodedStargateMsgToCw,
   getAccountAddress,
   getAccountChainId,
+  getChainForChainId,
   getDisplayNameForChainId,
-  getFallbackImage,
   maybeMakePolytoneExecuteMessage,
-  protobufToCwMsg,
-  toAccessibleImageUrl,
 } from '@dao-dao/utils'
-import { TxBody } from '@dao-dao/utils/protobuf/codegen/cosmos/tx/v1beta1/tx'
 
 import { useActionsForMatching } from '../../../actions'
-import { useWallet } from '../../../hooks/useWallet'
+import { useProfile } from '../../../hooks'
 import {
   ProposalModuleAdapterCommonProvider,
   matchAdapter as matchProposalModuleAdapter,
@@ -55,14 +60,18 @@ import { NewProposalForm as NewSingleChoiceProposalForm } from '../../../proposa
 import { useProposalModuleAdapterCommonContext } from '../../../proposal-module-adapter/react/context'
 import { ConnectWallet } from '../../ConnectWallet'
 import { SuspenseLoader } from '../../SuspenseLoader'
-import { ConnectedWalletDisplay, DisconnectWallet } from '../../wallet'
 import { ProposalDaoInfoCards } from '../ProposalDaoInfoCards'
+
+// Wallet account secp256k1 public keys are expected to be 33 bytes starting
+// with 0x02 or 0x03. This will be used when simulating requests, but not when
+// signing since we intercept messages. This may cause problems with some dApps
+// if simulation fails...
+const EMPTY_PUB_KEY = new Uint8Array([0x02, ...[...new Array(32)].map(() => 0)])
 
 export const AppsTab = () => {
   const { t } = useTranslation()
   const {
     name,
-    imageUrl,
     chainId: currentChainId,
     coreAddress,
     polytoneProxies,
@@ -77,14 +86,43 @@ export const AppsTab = () => {
       DaoProposalSingleAdapterId
   )
 
-  const [msgs, setMsgs] = useState<CosmosMsgFor_Empty[]>()
+  const [msgs, setMsgs] = useState<UnifiedCosmosMsg[]>()
   const [fullScreen, setFullScreen] = useState(false)
 
-  const addressForChainId = (chainId: string) =>
-    getAccountAddress({
-      accounts,
-      chainId,
-    }) || ''
+  const addressForChainId = (chainId: string) => {
+    const address =
+      getAccountAddress({
+        accounts,
+        chainId,
+        types: [AccountType.Native, AccountType.Polytone],
+      }) ||
+      // Fallback to ICA if exists, but don't use if a native or polytone
+      // account exists.
+      getAccountAddress({
+        accounts,
+        chainId,
+        types: [AccountType.Ica],
+      })
+    if (!address) {
+      // If chain ID is empty (user or client error I believe), just return
+      // core DAO address since the error won't be helpful.
+      if (!chainId) {
+        console.error(
+          'DAO DAO app `chainId` should not be empty in `addressForChainId`, but it is. Returning core DAO address.'
+        )
+        return coreAddress
+      }
+
+      throw new Error(
+        t('error.daoMissingAccountsOnChains', {
+          daoName: name,
+          chains: `${getDisplayNameForChainId(chainId)} (${chainId})`,
+          count: 1,
+        })
+      )
+    }
+    return address
+  }
   const chainIdForAddress = (address: string) =>
     getAccountChainId({
       accounts,
@@ -103,7 +141,7 @@ export const AppsTab = () => {
       maybeMakePolytoneExecuteMessage(
         currentChainId,
         chainId,
-        protobufToCwMsg(msg).msg
+        protobufToCwMsg(getChainForChainId(chainId), msg, false).msg
       )
     )
     setMsgs(messages)
@@ -119,14 +157,26 @@ export const AppsTab = () => {
       maybeMakePolytoneExecuteMessage(
         currentChainId,
         chainId,
-        decodedStargateMsgToCw(aminoTypes.fromAmino(msg)).msg
+        decodedStargateMsgToCw(
+          getChainForChainId(chainId),
+          getAminoTypes().fromAmino(msg)
+        ).msg
       )
     )
     setMsgs(messages)
   }
 
-  const enableAndConnect = (chainIds: string | string[]) =>
-    [chainIds].flat().some((chainId) => addressForChainId(chainId))
+  const enableAndConnect = (chainIds: string | string[]): OverrideHandler =>
+    [chainIds].flat().some((chainId) => {
+      try {
+        // Throws error if account not found.
+        addressForChainId(chainId)
+
+        return true
+      } catch {
+        return false
+      }
+    })
       ? {
           type: 'success',
         }
@@ -136,24 +186,19 @@ export const AppsTab = () => {
             daoName: name,
             chains: [chainIds]
               .flat()
-              .map((chainId) => getDisplayNameForChainId(chainId))
+              .map(
+                (chainId) => `${getDisplayNameForChainId(chainId)} (${chainId})`
+              )
               .join(', '),
             count: [chainIds].flat().length,
           }),
         }
 
   const { wallet, iframeRef } = useIframe({
-    walletInfo: {
-      prettyName: name,
-      logo: imageUrl
-        ? toAccessibleImageUrl(imageUrl)
-        : SITE_URL + getFallbackImage(coreAddress),
+    metadata: {
+      name: SITE_TITLE,
+      imageUrl: SITE_URL + '/daodao.png',
     },
-    accountReplacement: async (chainId) => ({
-      username: name,
-      address: addressForChainId(chainId),
-      pubkey: await getPubKey(chainId),
-    }),
     walletClientOverrides: {
       // @ts-ignore
       signAmino: (_chainId: string, signer: string, signDoc: StdSignDoc) => {
@@ -194,7 +239,7 @@ export const AppsTab = () => {
         value: {
           address: addressForChainId(chainId),
           algo: 'secp256k1',
-          pubkey: await getPubKey(chainId),
+          pubkey: EMPTY_PUB_KEY,
           username: name,
         } as WalletAccount,
       }),
@@ -207,81 +252,64 @@ export const AppsTab = () => {
           username: name,
         } as SimpleAccount,
       }),
-    },
-    aminoSignerOverrides: {
-      signAmino: (signerAddress, signDoc) => {
-        decodeAmino(signerAddress, signDoc)
+      // Needed by Graz and other Keplr clients.
+      getKey: async (chainId: string) => {
+        let bech32Address = ''
+        // Ignore invalid chains for now.
+        try {
+          bech32Address = addressForChainId(chainId)
+        } catch {}
 
         return {
-          type: 'error',
-          error: 'Handled by DAO browser.',
+          type: 'success',
+          value: {
+            name,
+            algo: 'secp256k1',
+            pubkey: EMPTY_PUB_KEY,
+            address: bech32Address
+              ? fromBech32(bech32Address).data
+              : new Uint8Array([]),
+            bech32Address,
+            isNanoLedger: false,
+            isKeystone: false,
+          },
         }
       },
-      getAccounts: async () => ({
-        type: 'success',
-        // Will be overridden by `accountReplacement` function for the
-        // appropriate chain, so just put filler data.
-        value: [
-          {
-            address: coreAddress,
-            algo: 'secp256k1',
-            pubkey: await getPubKey(currentChainId),
-          },
-          ...(await Promise.all(
-            Object.entries(polytoneProxies).map(async ([chainId, address]) => ({
-              address,
-              algo: 'secp256k1',
-              pubkey: await getPubKey(chainId),
-            }))
-          )),
-        ] as AccountData[],
-      }),
     },
-    directSignerOverrides: {
+    signerOverrides: {
       signDirect: (signerAddress, signDoc) => {
         decodeDirect(signerAddress, signDoc.bodyBytes)
 
         return {
           type: 'error',
-          error: 'Handled by DAO browser.',
+          error: 'Handled by DAO.',
+        }
+      },
+      signAmino: (signerAddress, signDoc) => {
+        decodeAmino(signerAddress, signDoc)
+
+        return {
+          type: 'error',
+          error: 'Handled by DAO.',
         }
       },
       getAccounts: async () => ({
         type: 'success',
-        // Will be overridden by `accountReplacement` function for the
-        // appropriate chain, so just put filler data.
         value: [
           {
             address: coreAddress,
             algo: 'secp256k1',
-            pubkey: await getPubKey(currentChainId),
+            pubkey: EMPTY_PUB_KEY,
           },
-          ...(await Promise.all(
-            Object.entries(polytoneProxies).map(async ([chainId, address]) => ({
-              address,
-              algo: 'secp256k1',
-              pubkey: await getPubKey(chainId),
-            }))
-          )),
+          ...Object.values(polytoneProxies).map((address) => ({
+            address,
+            algo: 'secp256k1',
+            pubkey: EMPTY_PUB_KEY,
+          })),
         ] as AccountData[],
       }),
     },
   })
-
-  const getPubKey = async (chainId: string) => {
-    // Wallet account secp256k1 public keys are expected to be 33 bytes starting
-    // with 0x02 or 0x03. This will be used when simulating requests, but not
-    // when signing since we intercept messages. This may cause problems with
-    // some dApps if simulation fails...
-    let pubKey
-    try {
-      pubKey = (await wallet.client.getAccount?.(chainId))?.pubkey
-    } catch {
-      pubKey = new Uint8Array([0x02, ...[...new Array(32)].map(() => 0)])
-    }
-
-    return pubKey
-  }
 
   // Connect to iframe wallet on load if disconnected.
   const connectingRef = useRef(false)
@@ -289,7 +317,7 @@ export const AppsTab = () => {
     if (wallet && !wallet.isWalletConnected && !connectingRef.current) {
       connectingRef.current = true
       try {
-        wallet.connect()
+        wallet.connect(false)
       } finally {
         connectingRef.current = false
       }
@@ -306,8 +334,7 @@ export const AppsTab = () => {
 
       {msgs && (
         <ProposalModuleAdapterCommonProvider
-          coreAddress={coreAddress}
-          proposalModule={singleChoiceProposalModule}
+          proposalModuleAddress={singleChoiceProposalModule.address}
         >
           <ActionMatcherAndProposer
             key={JSON.stringify(msgs)}
@@ -318,15 +345,16 @@ export const AppsTab = () => {
       )}
     </>
   ) : (
-    <WarningCard
+    <StatusCard
       content={t('error.noSingleChoiceProposalModuleAppsDisabled')}
+      style="warning"
     />
   )
 }
 
 type ActionMatcherAndProposerProps = {
-  msgs: CosmosMsgFor_Empty[]
-  setMsgs: (msgs: CosmosMsgFor_Empty[] | undefined) => void
+  msgs: UnifiedCosmosMsg[]
+  setMsgs: (msgs: UnifiedCosmosMsg[] | undefined) => void
 }
 
 const ActionMatcherAndProposer = ({
@@ -335,7 +363,7 @@ const ActionMatcherAndProposer = ({
 }: ActionMatcherAndProposerProps) => {
   const { t } = useTranslation()
   const { coreAddress } = useDaoInfoContext()
-  const { isWalletConnected } = useWallet()
+  const { connected, profile } = useProfile()
 
   const {
     id: proposalModuleAdapterCommonId,
@@ -522,18 +550,24 @@ const ActionMatcherAndProposer = ({
     <Modal
       backdropClassName="!z-[39]"
       containerClassName="sm:!max-w-[min(90dvw,64rem)] !w-full"
-      footerContainerClassName="flex flex-row justify-between gap-8"
+      footerContainerClassName="flex flex-row justify-end"
       footerContent={
-        isWalletConnected ? (
+        connected ? (
           <>
-            <ConnectedWalletDisplay className="min-w-0 overflow-hidden" />
-            <DisconnectWallet />
+            <div className="flex min-w-0 flex-row items-center gap-2">
+              {/* Image */}
+              <ProfileImage
+                imageUrl={profile.loading ? undefined : profile.data.imageUrl}
+                loading={profile.loading}
+                size="sm"
+              />
+
+              {/* Name */}
+              <ProfileNameDisplayAndEditor profile={profile} />
+            </div>
           </>
         ) : (
-          <>
-            <div></div>
-            <ConnectWallet />
-          </>
+          <ConnectWallet size="md" />
         )
       }
       header={{

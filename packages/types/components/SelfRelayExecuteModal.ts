@@ -1,4 +1,5 @@
-import { CosmosMsgForEmpty } from '../contracts'
+import { UnifiedCosmosMsg } from '../contracts'
+import { CrossChainPacketInfo } from '../proposal'
 import { ModalProps } from './Modal'
 
 export type SelfRelayExecuteModalProps = Pick<
@@ -13,6 +14,8 @@ export type SelfRelayExecuteModalProps = Pick<
   uniqueId: string
   // All chain IDs that will receive an IBC packet.
   chainIds: string[]
+  // Cross-chain packets that contain the packets that need self-relaying.
+  crossChainPackets: CrossChainPacketInfo[]
   // Information on how to find the transaction to relay packets from.
   transaction: SelfRelayTransaction
   // Called when the self-relay execution is successful and all relayer wallets
@@ -25,7 +28,7 @@ export type SelfRelayTransaction =
       type: 'execute'
       // CosmWasm-formatted messages to execute that will create IBC packets
       // that need self-relaying.
-      msgs: CosmosMsgForEmpty[]
+      msgs: UnifiedCosmosMsg[]
     }
   | {
       type: 'exists'

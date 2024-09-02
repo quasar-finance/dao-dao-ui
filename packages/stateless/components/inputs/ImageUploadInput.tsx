@@ -6,7 +6,7 @@ export type ImageUploadInputProps = Omit<
   ImageDropInputProps,
   'onSelect' | 'loading'
 > & {
-  onChange: (url: string) => void | Promise<void>
+  onChange: (url: string, file: File) => void | Promise<void>
   onError?: (error: unknown) => void
 }
 
@@ -30,12 +30,20 @@ export const ImageUploadInput = ({
         body: form,
       })
 
+      if (!response.ok) {
+        const fallback = `Failed to upload image. Status: ${response.status} ${response.statusText}`
+        throw new Error(
+          (await response.json().catch(() => ({ error: fallback })))?.error ||
+            fallback
+        )
+      }
+
       const { cid } = await response.json()
       if (!cid) {
         throw new Error('Failed to upload image')
       }
 
-      onChange(`ipfs://${cid}`)
+      onChange(`ipfs://${cid}`, file)
     } catch (err) {
       console.error(err)
       onError?.(err)

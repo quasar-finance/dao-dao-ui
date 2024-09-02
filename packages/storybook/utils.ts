@@ -1,30 +1,19 @@
-import { ChainId, WalletProfileData } from '@dao-dao/types'
+import { ChainId, UnifiedProfile } from '@dao-dao/types'
 
 // Use Juno mainnet as storybook chains.
 export const CHAIN_ID = ChainId.JunoMainnet
 
-export const WALLET_PROFILE_DATA: WalletProfileData = {
-  loading: false,
-  address: '0x123',
-  profile: {
-    nonce: 0,
-    imageUrl: '/noah.jpg',
-    name: '@Modern-Edamame',
-    nameSource: 'pfpk',
-    nft: null,
+export const WALLET_PROFILE_DATA: UnifiedProfile = {
+  uuid: 'uuid',
+  nonce: 1,
+  name: '@Modern-Edamame',
+  nft: null,
+  chains: {},
+  source: {
+    chainId: CHAIN_ID,
+    address: 'address',
   },
-  backupImageUrl: '/placeholder/1.svg',
-}
-
-export const WALLET_PROFILE_DATA_LOADING: WalletProfileData = {
-  loading: true,
-  address: '0x123',
-  profile: {
-    nonce: 0,
-    imageUrl: '/placeholder/1.svg',
-    name: null,
-    nameSource: 'pfpk',
-    nft: null,
-  },
+  imageUrl: '/noah.jpg',
+  nameSource: 'pfpk',
   backupImageUrl: '/placeholder/1.svg',
 }

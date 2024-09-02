@@ -28,7 +28,6 @@ import {
   DaoVotingCw721StakedHooks,
   useAwaitNextBlock,
   useWallet,
-  useWalletInfo,
 } from '../../../../hooks'
 import { ProfileCardMemberInfoTokens } from '../../../components'
 import { useGovernanceCollectionInfo, useStakingInfo } from '../hooks'
@@ -41,8 +40,11 @@ export const ProfileCardMemberInfo = ({
   const { t } = useTranslation()
   const { chain_id: chainId } = useChain()
   const { name: daoName } = useDaoInfoContext()
-  const { address: walletAddress, isWalletConnected } = useWallet()
-  const { refreshBalances } = useWalletInfo()
+  const {
+    address: walletAddress,
+    isWalletConnected,
+    refreshBalances,
+  } = useWallet()
   const [showStakingModal, setShowStakingModal] = useState(false)
   const [claimingLoading, setClaimingLoading] = useState(false)
   const stakingLoading = useRecoilValue(stakingLoadingAtom)

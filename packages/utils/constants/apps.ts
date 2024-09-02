@@ -8,18 +8,17 @@ export const DAO_APPS: DaoApp[] = [
     imageUrl: 'https://app.osmosis.zone/images/preview.jpg',
     url: 'https://app.osmosis.zone',
   },
-  // TODO(apps): uncomment when Stargaze works
-  // {
-  //   name: 'Stargaze',
-  //   imageUrl: 'https://stargaze.zone/TwitterCard.png',
-  //   url: MAINNET
-  //     ? 'https://stargaze.zone'
-  //     : 'https://testnet.publicawesome.dev',
-  // },
   {
-    name: 'Calculated Finance',
-    imageUrl: '/apps/calcfi.jpg',
-    url: 'https://app.calculated.fi/?chain=osmosis-1',
+    name: 'Astroport',
+    imageUrl: 'https://app.astroport.fi/thumbnail.jpg',
+    url: 'https://app.astroport.fi/swap',
+  },
+  {
+    name: 'Stargaze',
+    imageUrl: 'https://stargaze.zone/TwitterCard.png',
+    url: MAINNET
+      ? 'https://stargaze.zone'
+      : 'https://testnet.publicawesome.dev',
   },
   {
     name: 'Stargaze Studio',
@@ -27,6 +26,11 @@ export const DAO_APPS: DaoApp[] = [
     url: MAINNET
       ? 'https://studio.stargaze.zone'
       : 'https://studio.publicawesome.dev',
+  },
+  {
+    name: 'Calculated Finance',
+    imageUrl: '/apps/calcfi.jpg',
+    url: 'https://app.calculated.fi/?chain=osmosis-1',
   },
   {
     name: 'FIN',
@@ -56,6 +60,13 @@ export const DAO_APPS: DaoApp[] = [
     name: 'Kleomedes',
     imageUrl: '/apps/kleomedes.png',
     url: 'https://dashboard.kleomed.es',
+  },
+  {
+    name: 'Atlas',
+    imageUrl: '/apps/atlas.jpg',
+    url: MAINNET
+      ? 'https://app.atlasdao.zone'
+      : 'https://testapp.atlasdao.zone',
   },
 
   // Must be last for index matching. Enables custom URL input.

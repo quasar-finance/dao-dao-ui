@@ -1,6 +1,7 @@
 import clsx from 'clsx'
 import { ComponentType, ReactNode, useEffect } from 'react'
 
+import { BaseProposalVotesProps } from '@dao-dao/types'
 import {
   PAGE_PADDING_BOTTOM_CLASSES,
   PAGE_PADDING_HORIZONTAL_CLASSES,
@@ -10,15 +11,15 @@ import {
 
 export type ProposalProps = {
   voteTally: ReactNode
-  votesCast: ReactNode
   contentDisplay: ReactNode
+  VotesCast?: ComponentType<BaseProposalVotesProps>
   ProposalStatusAndInfo: ComponentType<{ inline?: boolean }>
 }
 
 export const Proposal = ({
   voteTally,
-  votesCast,
   contentDisplay,
+  VotesCast,
   ProposalStatusAndInfo,
 }: ProposalProps) => {
   // Scroll to hash manually if available since this component and thus the
@@ -72,7 +73,7 @@ export const Proposal = ({
 
         <div>{voteTally}</div>
 
-        <div className="mt-8">{votesCast}</div>
+        {VotesCast && <VotesCast className="mt-8" />}
       </div>
     </div>
   )

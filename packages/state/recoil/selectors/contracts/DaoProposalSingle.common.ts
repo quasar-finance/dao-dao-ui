@@ -1,6 +1,11 @@
-import { selectorFamily } from 'recoil'
+import { RecoilValueReadOnly, selectorFamily } from 'recoil'
 
-import { contractVersionSelector } from '@dao-dao/state'
+import {
+  contractVersionSelector,
+  queryContractIndexerSelector,
+  refreshProposalIdAtom,
+  refreshProposalsIdAtom,
+} from '@dao-dao/state'
 import { ContractVersion, WithChainId } from '@dao-dao/types'
 import {
   ConfigResponse as ConfigV1Response,
@@ -13,9 +18,9 @@ import {
   VoteResponse,
 } from '@dao-dao/types/contracts/DaoProposalSingle.common'
 import {
-  ConfigResponse as ConfigV2Response,
+  Config as ConfigV2Response,
   ProposalResponse as ProposalV2Response,
-  ReverseProposalsResponse as ReverseProposalsV2Response,
+  ProposalListResponse as ReverseProposalsV2Response,
 } from '@dao-dao/types/contracts/DaoProposalSingle.v2'
 
 import {
@@ -111,6 +116,30 @@ export const listAllVotesSelector = selectorFamily<
   get:
     ({ proposalId, ...queryClientParams }) =>
     async ({ get }) => {
+      // Attempt to load all from indexer first.
+      const id =
+        get(refreshProposalsIdAtom) +
+        get(
+          refreshProposalIdAtom({
+            address: queryClientParams.contractAddress,
+            proposalId,
+          })
+        )
+
+      const indexerVotes = get(
+        queryContractIndexerSelector({
+          ...queryClientParams,
+          formula: 'daoProposalSingle/listVotes',
+          args: {
+            proposalId,
+          },
+          id,
+        })
+      )
+      if (indexerVotes) {
+        return indexerVotes
+      }
+
       const votes: VoteInfo[] = []
 
       while (true) {
@@ -137,6 +166,56 @@ export const listAllVotesSelector = selectorFamily<
       }
 
       return votes
+    },
+})
+
+export const listPaginatedVotesSelector: (
+  param: QueryClientParams & {
+    proposalId: number
+    page: number
+    pageSize: number
+  }
+) => RecoilValueReadOnly<ListVotesResponse> = selectorFamily({
+  key: 'daoProposalSingleCommonListPaginatedVotes',
+  get:
+    ({ proposalId, page, pageSize, ...queryClientParams }) =>
+    async ({ get }) => {
+      const proposalModuleVersion = get(
+        contractVersionSelector(queryClientParams)
+      )
+      const selector =
+        proposalModuleVersion === ContractVersion.V1
+          ? listVotesV1Selector
+          : listVotesV2Selector
+
+      let startAfter: string | undefined
+      // Get last page so we can retrieve the last voter from it.
+      if (page > 1) {
+        const lastPage = get(
+          listPaginatedVotesSelector({
+            ...queryClientParams,
+            proposalId,
+            page: page - 1,
+            pageSize,
+          })
+        )
+        if (lastPage.votes.length > 0) {
+          startAfter = lastPage.votes[lastPage.votes.length - 1].voter
+        }
+      }
+
+      return get<ListVotesResponse>(
+        selector({
+          ...queryClientParams,
+          params: [
+            {
+              proposalId,
+              startAfter,
+              limit: pageSize,
+            },
+          ],
+        })
+      )
     },
 })
 

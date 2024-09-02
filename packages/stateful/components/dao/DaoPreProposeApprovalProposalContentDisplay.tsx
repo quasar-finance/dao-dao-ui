@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 import {
   Loader,
   ProposalContentDisplay,
-  WarningCard,
+  StatusCard,
   useDaoInfoContext,
   useDaoNavHelpers,
 } from '@dao-dao/stateless'
@@ -13,7 +13,7 @@ import {
   CommonProposalInfo,
   ProposalPrefill,
 } from '@dao-dao/types'
-import { keyFromPreProposeStatus } from '@dao-dao/utils'
+import { encodeJsonToBase64, keyFromPreProposeStatus } from '@dao-dao/utils'
 
 import { useActionsForMatching } from '../../actions'
 import { useEntity } from '../../hooks'
@@ -44,7 +44,7 @@ export const DaoPreProposeApprovalProposalContentDisplay = ({
     useLoadingPreProposeApprovalProposal()
 
   const creatorAddress = proposalInfo.createdByAddress
-  const loadingEntity = useEntity(creatorAddress)
+  const { entity } = useEntity(creatorAddress)
 
   const { refreshProposal, refreshing } = useProposalRefreshers()
 
@@ -61,12 +61,17 @@ export const DaoPreProposeApprovalProposalContentDisplay = ({
   // duplicate button remains hidden until the form data is loaded.
   const duplicateUrl = duplicateFormData
     ? getDaoProposalPath(coreAddress, 'create', {
-        prefill: JSON.stringify(prefill),
+        prefill: encodeJsonToBase64(prefill),
       })
     : undefined
 
   if (!PreProposeApprovalInnerContentDisplay) {
-    return <WarningCard content={t('error.unsupportedApprovalFailedRender')} />
+    return (
+      <StatusCard
+        content={t('error.unsupportedApprovalFailedRender')}
+        style="warning"
+      />
+    )
   }
 
   if (
@@ -93,7 +98,7 @@ export const DaoPreProposeApprovalProposalContentDisplay = ({
       }
       creator={{
         address: creatorAddress,
-        entity: loadingEntity,
+        entity,
       }}
       description={proposalInfo.description}
       duplicateUrl={duplicateUrl}

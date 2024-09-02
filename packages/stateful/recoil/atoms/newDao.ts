@@ -1,5 +1,6 @@
 import cloneDeep from 'lodash.clonedeep'
 import { atom, atomFamily } from 'recoil'
+import { v4 as uuidv4 } from 'uuid'
 
 import { localStorageEffectJSON } from '@dao-dao/state/recoil/effects'
 import {
@@ -14,6 +15,7 @@ import {
   MembershipBasedCreatorId,
   convertCosmosVetoConfigToVeto,
   getNativeTokenForChainId,
+  getSupportedChainConfig,
 } from '@dao-dao/utils'
 
 import { MembershipBasedCreator } from '../../creators/MembershipBased'
@@ -25,13 +27,18 @@ import {
 // Avoid cyclic dependencies issues with the adapter modules by using a lazy
 // maker function.
 export const makeDefaultNewDao = (chainId: string): NewDao => ({
+  uuid: uuidv4(),
   chainId,
   name: '',
   description: '',
   imageUrl: undefined,
   creator: {
     id: MembershipBasedCreatorId,
-    data: cloneDeep(MembershipBasedCreator.defaultConfig),
+    data: cloneDeep(
+      MembershipBasedCreator.makeDefaultConfig(
+        getSupportedChainConfig(chainId)!
+      )
+    ),
   },
   // Default to single and multiple choice proposal configuration.
   proposalModuleAdapters: [
@@ -66,6 +73,7 @@ export const makeDefaultNewDao = (chainId: string): NewDao => ({
       refundPolicy: DepositRefundPolicy.OnlyPassed,
     },
     anyoneCanPropose: false,
+    onlyMembersExecute: true,
     allowRevoting: false,
     enableMultipleChoice: true,
     approver: {
@@ -76,6 +84,7 @@ export const makeDefaultNewDao = (chainId: string): NewDao => ({
     veto: convertCosmosVetoConfigToVeto(null),
   },
   advancedVotingConfigEnabled: false,
+  widgets: {},
 })
 
 export const newDaoAtom = atomFamily<

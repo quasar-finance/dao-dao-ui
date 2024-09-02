@@ -12,7 +12,7 @@ import {
   UseTransformToCosmos,
 } from '@dao-dao/types/actions'
 import {
-  DAO_WIDGET_ITEM_NAMESPACE,
+  getWidgetStorageItemKey,
   makeWasmMessage,
   objectMatchesStructure,
 } from '@dao-dao/utils'
@@ -68,7 +68,9 @@ export const makeManageWidgetsAction: ActionMaker<ManageWidgetsData> = ({
     return null
   }
 
-  const valueKey = context.info.supportedFeatures[Feature.StorageItemValueKey]
+  const valueKey = context.dao.info.supportedFeatures[
+    Feature.StorageItemValueKey
+  ]
     ? 'value'
     : 'addr'
 
@@ -84,13 +86,13 @@ export const makeManageWidgetsAction: ActionMaker<ManageWidgetsData> = ({
                 mode === 'set'
                   ? {
                       set_item: {
-                        key: DAO_WIDGET_ITEM_NAMESPACE + id,
+                        key: getWidgetStorageItemKey(id),
                         [valueKey]: JSON.stringify(values),
                       },
                     }
                   : {
                       remove_item: {
-                        key: DAO_WIDGET_ITEM_NAMESPACE + id,
+                        key: getWidgetStorageItemKey(id),
                       },
                     },
             },
@@ -115,11 +117,11 @@ export const makeManageWidgetsAction: ActionMaker<ManageWidgetsData> = ({
       msg.wasm.execute.contract_addr === address &&
       (('set_item' in msg.wasm.execute.msg &&
         msg.wasm.execute.msg.set_item.key.startsWith(
-          DAO_WIDGET_ITEM_NAMESPACE
+          getWidgetStorageItemKey('')
         )) ||
         ('remove_item' in msg.wasm.execute.msg &&
           msg.wasm.execute.msg.remove_item.key.startsWith(
-            DAO_WIDGET_ITEM_NAMESPACE
+            getWidgetStorageItemKey('')
           )))
     ) {
       const mode = 'set_item' in msg.wasm.execute.msg ? 'set' : 'delete'
@@ -140,7 +142,7 @@ export const makeManageWidgetsAction: ActionMaker<ManageWidgetsData> = ({
           id: (mode === 'set'
             ? msg.wasm.execute.msg.set_item.key
             : msg.wasm.execute.msg.remove_item.key
-          ).replace(new RegExp(`^${DAO_WIDGET_ITEM_NAMESPACE}`), ''),
+          ).replace(new RegExp(`^${getWidgetStorageItemKey('')}`), ''),
           values,
         },
       }

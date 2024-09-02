@@ -12,17 +12,40 @@ export type TokenAmountDisplayProps = Omit<
   prefixClassName?: string
   suffix?: string
   suffixClassName?: string
-  // Max decimals to display.
+  /**
+   * Max decimals to display.
+   */
   maxDecimals?: number
-  // Don't show approximation indication (like a tilde).
+  /**
+   * Don't show approximation indication (like a tilde).
+   */
   hideApprox?: boolean
-  // Add to tooltip if present.
+  /**
+   * Add to tooltip if present.
+   */
   dateFetched?: Date
-  // Show full amount if true.
+  /**
+   * Show full amount if true.
+   */
   showFullAmount?: boolean
-  // If present, will add a rounded icon to the left.
+  /**
+   * If present, will add a rounded icon to the left.
+   */
   iconUrl?: string
   iconClassName?: string
+  /**
+   * Overlay the chain logo over the bottom right corner of the token icon and
+   * add a tooltip.
+   */
+  showChainId?: string
+  /**
+   * Optionally specify a callback when clicked and make the pointer a cursor.
+   */
+  onClick?: () => void
+  /**
+   * Optionally apply a class name to the div wrapper.
+   */
+  wrapperClassName?: string
 } & ( // If not USD estimate, require symbol and decimals.
     | {
         symbol: string
@@ -33,8 +56,8 @@ export type TokenAmountDisplayProps = Omit<
       }
     // Alow hiding symbol.
     | {
-        symbol?: never
-        hideSymbol: true
+        symbol?: string
+        hideSymbol: boolean
         // Full decimal precision of the value.
         decimals: number
         estimatedUsdValue?: false
@@ -58,6 +81,7 @@ export type StatefulTokenAmountDisplayProps = Pick<
   | 'hideApprox'
   | 'showFullAmount'
   | 'iconClassName'
+  | 'onClick'
 > & {
   coin: Coin
 }

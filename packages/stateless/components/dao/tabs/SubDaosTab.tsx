@@ -5,24 +5,26 @@ import { useTranslation } from 'react-i18next'
 import {
   ButtonLinkProps,
   ContractVersion,
-  DaoCardInfo,
+  DaoInfo,
   Feature,
-  LoadingData,
+  LoadingDataWithError,
+  StatefulDaoCardProps,
 } from '@dao-dao/types'
 
-import { useDaoInfoContext, useDaoNavHelpers } from '../../../hooks'
+import { useDaoInfoContext } from '../../../contexts'
+import { useDaoNavHelpers } from '../../../hooks'
+import { ErrorPage } from '../../error'
 import { GridCardContainer } from '../../GridCardContainer'
 import { NoContent } from '../../NoContent'
 import { Tooltip } from '../../tooltip'
 import { DaoCardLoader } from '../DaoCard'
 
 export interface SubDaosTabProps {
-  DaoCard: ComponentType<DaoCardInfo>
-  subDaos: LoadingData<DaoCardInfo[]>
+  DaoCard: ComponentType<StatefulDaoCardProps>
+  subDaos: LoadingDataWithError<DaoInfo[]>
   isMember: boolean
   createSubDaoHref?: string
   upgradeToV2Href?: string
-  hideCreateButton?: boolean
   ButtonLink: ComponentType<ButtonLinkProps>
 }
 
@@ -32,7 +34,6 @@ export const SubDaosTab = ({
   isMember,
   createSubDaoHref,
   upgradeToV2Href,
-  hideCreateButton,
   ButtonLink,
 }: SubDaosTabProps) => {
   const { t } = useTranslation()
@@ -52,30 +53,28 @@ export const SubDaosTab = ({
           <p className="secondary-text">{t('info.subDaoExplanation')}</p>
         </div>
 
-        {!hideCreateButton && (
-          <Tooltip
-            title={
-              !subDaosSupported
-                ? t('error.daoFeatureUnsupported', {
-                    name,
-                    feature: t('title.subDaos'),
-                  })
-                : !isMember
-                ? t('error.mustBeMemberToCreateSubDao')
-                : undefined
-            }
+        <Tooltip
+          title={
+            !subDaosSupported
+              ? t('error.daoFeatureUnsupported', {
+                  name,
+                  feature: t('title.subDaos'),
+                })
+              : !isMember
+              ? t('error.mustBeMemberToCreateSubDao')
+              : undefined
+          }
+        >
+          <ButtonLink
+            className="shrink-0"
+            disabled={!isMember || !subDaosSupported}
+            href={getDaoPath(coreAddress, 'create')}
           >
-            <ButtonLink
-              className="shrink-0"
-              disabled={!isMember || !subDaosSupported}
-              href={getDaoPath(coreAddress, 'create')}
-            >
-              <Add className="!h-4 !w-4" />
-              <span className="hidden md:inline">{t('button.newSubDao')}</span>
-              <span className="md:hidden">{t('button.new')}</span>
-            </ButtonLink>
-          </Tooltip>
-        )}
+            <Add className="!h-4 !w-4" />
+            <span className="hidden md:inline">{t('button.newSubDao')}</span>
+            <span className="md:hidden">{t('button.new')}</span>
+          </ButtonLink>
+        </Tooltip>
       </div>
 
       {!subDaosSupported ? (
@@ -89,6 +88,8 @@ export const SubDaosTab = ({
           buttonLabel={t('button.proposeUpgrade')}
           href={isMember ? upgradeToV2Href : undefined}
         />
+      ) : subDaos.errored ? (
+        <ErrorPage error={subDaos.error} />
       ) : subDaos.loading || subDaos.data.length > 0 ? (
         <>
           <p className="title-text mb-6 border-t border-border-secondary pt-6 text-text-body">
@@ -100,8 +101,8 @@ export const SubDaosTab = ({
           <GridCardContainer>
             {subDaos.loading
               ? [...Array(3)].map((_, index) => <DaoCardLoader key={index} />)
-              : subDaos.data.map((props, index) => (
-                  <DaoCard {...props} key={index} />
+              : subDaos.data.map((info, index) => (
+                  <DaoCard key={index} info={info} />
                 ))}
           </GridCardContainer>
         </>

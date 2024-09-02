@@ -1,19 +1,23 @@
 import { useSetRecoilState } from 'recoil'
 
-import { updateProfileNftVisibleAtom } from '@dao-dao/state'
+import { mergeProfilesVisibleAtom } from '@dao-dao/state'
 import { NavWallet as StatelessNavWallet } from '@dao-dao/stateless'
 import { StatefulNavWalletProps } from '@dao-dao/types'
 
-import { useInboxApiWithUi, useWallet, useWalletInfo } from '../hooks'
+import { useInboxApiWithUi, useManageProfile, useWallet } from '../hooks'
+import { ButtonLink } from './ButtonLink'
 import { InboxMainItemRenderer } from './inbox'
 import { SuspenseLoader } from './SuspenseLoader'
 
 export const NavWallet = (props: StatefulNavWalletProps) => {
-  const { openView, isWalletConnected, address, wallet, disconnect } =
-    useWallet()
-  const { walletProfileData, updateProfileName } = useWalletInfo()
-  const setUpdateProfileNftVisible = useSetRecoilState(
-    updateProfileNftVisibleAtom
+  const { openView, isWalletConnected, wallet, disconnect } = useWallet()
+  const {
+    profile,
+    merge: { options: profileMergeOptions },
+  } = useManageProfile()
+
+  const setMergeProfilesModalVisible = useSetRecoilState(
+    mergeProfilesVisibleAtom
   )
 
   // Ignore errors loading inbox because the SDA does not have an inbox.
@@ -31,17 +35,23 @@ export const NavWallet = (props: StatefulNavWalletProps) => {
         <StatelessNavWallet connected={false} loading mode={props.mode} />
       }
     >
-      {isWalletConnected && address && wallet ? (
+      {isWalletConnected && wallet ? (
         <StatelessNavWallet
+          ButtonLink={ButtonLink}
           InboxMainItemRenderer={InboxMainItemRenderer}
           connected
           disconnect={disconnect}
           inbox={inbox}
-          onEditProfileImage={() => setUpdateProfileNftVisible(true)}
-          updateProfileName={updateProfileName}
+          mergeProfileType={
+            profileMergeOptions.length === 0
+              ? undefined
+              : profileMergeOptions.length === 1
+              ? 'add'
+              : 'merge'
+          }
+          onMergeProfiles={() => setMergeProfilesModalVisible(true)}
+          profile={profile}
           wallet={wallet}
-          walletAddress={address}
-          walletProfileData={walletProfileData}
           {...props}
         />
       ) : (

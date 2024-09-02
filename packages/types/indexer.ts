@@ -3,7 +3,7 @@ import {
   Config,
   DumpStateResponse,
   ProposalModuleWithInfo,
-} from './contracts/DaoCore.v2'
+} from './contracts/DaoDaoCore'
 
 export enum IndexerFormulaType {
   Contract = 'contract',
@@ -27,6 +27,8 @@ export interface IndexerDumpState
   proposalCount?: number
   // Map polytone note address to remote address.
   polytoneProxies?: Record<string, string>
+  // Hide from search if storage item `hideFromSearch` exists.
+  hideFromSearch?: boolean
 }
 
 export type IndexerUpBlock = {
@@ -39,4 +41,37 @@ export type IndexerUpStatus = {
   chainBlock: IndexerUpBlock
   indexerBlock: IndexerUpBlock
   caughtUp: boolean
+}
+
+export type DaoDaoIndexerChainStats = {
+  daos: number
+  proposals: number
+  votes: number
+  uniqueVoters: number
+}
+
+export type DaoDaoIndexerAllStats = {
+  /**
+   * Stats from all time. If null, we have no stats for the chain (probably
+   * because we don't have an indexer running).
+   */
+  all: DaoDaoIndexerChainStats | null
+  /**
+   * Stats from last 30 days. If null, we have no stats for the chain (probably
+   * because we don't have an indexer running).
+   */
+  month: DaoDaoIndexerChainStats | null
+  /**
+   * Stats from last 7 days. If null, we have no stats for the chain (probably
+   * because we don't have an indexer running).
+   */
+  week: DaoDaoIndexerChainStats | null
+  /**
+   * Total TVL.
+   */
+  tvl: number | null
+  /**
+   * Number of chains DAO DAO is deployed on.
+   */
+  chains: number
 }

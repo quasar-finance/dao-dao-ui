@@ -1,10 +1,8 @@
+import { useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 
-import { DaoVotingCw721StakedSelectors } from '@dao-dao/state/recoil'
-import {
-  MembersTab as StatelessMembersTab,
-  useCachedLoadingWithError,
-} from '@dao-dao/stateless'
+import { daoVotingCw721StakedExtraQueries } from '@dao-dao/state/query'
+import { MembersTab as StatelessMembersTab } from '@dao-dao/stateless'
 import { StatefulDaoMemberCardProps } from '@dao-dao/types'
 
 import {
@@ -12,18 +10,20 @@ import {
   DaoMemberCard,
   EntityDisplay,
 } from '../../../../components'
+import { useQueryLoadingDataWithError } from '../../../../hooks'
 import { useVotingModuleAdapterOptions } from '../../../react/context'
-import { useGovernanceCollectionInfo } from '../hooks'
+import { useCommonGovernanceTokenInfo } from '../hooks'
 
 export const MembersTab = () => {
   const { t } = useTranslation()
   const { chainId, votingModuleAddress } = useVotingModuleAdapterOptions()
-  const { collectionInfo } = useGovernanceCollectionInfo()
+  const token = useCommonGovernanceTokenInfo()
 
-  const members = useCachedLoadingWithError(
-    DaoVotingCw721StakedSelectors.topStakersSelector({
+  const queryClient = useQueryClient()
+  const members = useQueryLoadingDataWithError(
+    daoVotingCw721StakedExtraQueries.topStakers(queryClient, {
       chainId,
-      contractAddress: votingModuleAddress,
+      address: votingModuleAddress,
     }),
     (data) =>
       data?.map(
@@ -33,12 +33,12 @@ export const MembersTab = () => {
           votingPowerPercent,
         }): StatefulDaoMemberCardProps => ({
           address,
+          balanceLabel: t('title.staked'),
           balance: {
-            label: t('title.staked'),
-            unit: '$' + collectionInfo.symbol,
-            value: {
-              loading: false,
-              data: count.toLocaleString(),
+            loading: false,
+            data: {
+              amount: count,
+              token,
             },
           },
           votingPowerPercent: {

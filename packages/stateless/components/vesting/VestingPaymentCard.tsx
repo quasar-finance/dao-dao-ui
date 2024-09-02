@@ -23,7 +23,7 @@ import {
   VestingStep,
 } from '@dao-dao/types'
 import {
-  concatAddressStartEnd,
+  abbreviateString,
   formatDateTimeTz,
   isNativeIbcUsdc,
   secondsToWdhms,
@@ -143,12 +143,15 @@ export const VestingPaymentCard = ({
     return () => clearTimeout(timeout)
   }, [copied])
 
-  // Can only withdraw if there is a distributable amount and a wallet is
-  // connected.
-  const canWithdraw = isWalletConnected && distributableAmount > 0
-
   const recipientIsDao =
     !recipientEntity.loading && recipientEntity.data.type === EntityType.Dao
+
+  // Can only withdraw if there is a distributable amount and the recipient is
+  // the currently connected wallet or is a DAO.
+  const canWithdraw =
+    isWalletConnected &&
+    (recipientIsWallet || recipientIsDao) &&
+    distributableAmount > 0
 
   const buttonPopupSections: ButtonPopupSection[] = useMemo(
     () => [
@@ -257,7 +260,7 @@ export const VestingPaymentCard = ({
   if (token.symbol.toLowerCase().startsWith('ibc')) {
     token = {
       ...token,
-      symbol: concatAddressStartEnd(token.symbol, 3, 2),
+      symbol: abbreviateString(token.symbol, 3, 2),
     }
   }
 
@@ -287,7 +290,7 @@ export const VestingPaymentCard = ({
               <ProfileImage
                 imageUrl={recipientEntity.data.imageUrl}
                 rounded
-                size="sm"
+                size="md"
               />
             )}
 

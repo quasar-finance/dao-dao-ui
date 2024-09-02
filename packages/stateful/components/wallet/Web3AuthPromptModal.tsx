@@ -10,9 +10,12 @@ import {
   CosmosMessageDisplay,
   Modal,
 } from '@dao-dao/stateless'
-import { ActionAndData } from '@dao-dao/types'
-import { decodeMessages, protobufToCwMsg } from '@dao-dao/utils'
-import { TxBody } from '@dao-dao/utils/protobuf/codegen/cosmos/tx/v1beta1/tx'
+import { ActionAndData, protobufToCwMsg } from '@dao-dao/types'
+import {
+  SignDoc,
+  TxBody,
+} from '@dao-dao/types/protobuf/codegen/cosmos/tx/v1beta1/tx'
+import { decodeMessages, getChainForChainId } from '@dao-dao/utils'
 
 import { useActionsForMatching } from '../../actions'
 import { WalletActionsProvider } from '../../actions/react/provider'
@@ -32,7 +35,11 @@ export const Web3AuthPromptModal = () => {
     if (prompt.signData.type === 'direct') {
       const messages = decodeMessages(
         TxBody.decode(prompt.signData.value.bodyBytes).messages.map(
-          (msg) => protobufToCwMsg(msg).msg
+          (msg) =>
+            protobufToCwMsg(
+              getChainForChainId((prompt.signData.value as SignDoc).chainId),
+              msg
+            ).msg
         )
       )
 

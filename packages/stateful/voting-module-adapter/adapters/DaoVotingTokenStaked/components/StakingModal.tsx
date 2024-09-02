@@ -18,7 +18,6 @@ import { BaseStakingModalProps } from '@dao-dao/types'
 import {
   CHAIN_GAS_MULTIPLIER,
   convertDenomToMicroDenomStringWithDecimals,
-  convertDenomToMicroDenomWithDecimals,
   convertMicroDenomToDenomWithDecimals,
   processError,
 } from '@dao-dao/utils'
@@ -28,7 +27,6 @@ import {
   DaoVotingTokenStakedHooks,
   useAwaitNextBlock,
   useWallet,
-  useWalletInfo,
 } from '../../../../hooks'
 import { useVotingModuleAdapterOptions } from '../../../react/context'
 import { useGovernanceTokenInfo, useStakingInfo } from '../hooks'
@@ -48,18 +46,19 @@ const InnerStakingModal = ({
   maxDeposit,
 }: BaseStakingModalProps) => {
   const { t } = useTranslation()
-  const { address: walletAddress, isWalletConnected } = useWallet()
-  const { refreshBalances } = useWalletInfo()
+  const {
+    address: walletAddress,
+    isWalletConnected,
+    refreshBalances,
+  } = useWallet()
   const { coreAddress, votingModuleAddress } = useVotingModuleAdapterOptions()
 
   const [stakingLoading, setStakingLoading] = useRecoilState(stakingLoadingAtom)
 
-  const {
-    token: governanceToken,
-    loadingWalletBalance: loadingUnstakedBalance,
-  } = useGovernanceTokenInfo({
-    fetchWalletBalance: true,
-  })
+  const { governanceToken, loadingWalletBalance: loadingUnstakedBalance } =
+    useGovernanceTokenInfo({
+      fetchWalletBalance: true,
+    })
   const {
     unstakingDuration,
     refreshTotals,
@@ -151,10 +150,10 @@ const InnerStakingModal = ({
 
         try {
           await doUnstake({
-            amount: convertDenomToMicroDenomWithDecimals(
+            amount: convertDenomToMicroDenomStringWithDecimals(
               amount,
               governanceToken.decimals
-            ).toString(),
+            ),
           })
 
           // New balances will not appear until the next block.

@@ -8,11 +8,11 @@ import { useTranslation } from 'react-i18next'
 import { v4 as uuidv4 } from 'uuid'
 
 import { codeDetailsSelector } from '@dao-dao/state/recoil'
-import { useCachedLoadable } from '@dao-dao/stateless'
-import { Coin, CosmosMsgFor_Empty } from '@dao-dao/types'
+import { useCachedLoadingWithError } from '@dao-dao/stateless'
+import { Coin, UnifiedCosmosMsg, cwMsgToEncodeObject } from '@dao-dao/types'
 import {
   CHAIN_GAS_MULTIPLIER,
-  cwMsgToEncodeObject,
+  isSecretNetwork,
   makeWasmMessage,
 } from '@dao-dao/utils'
 
@@ -56,23 +56,24 @@ export const useInstantiateAndExecute = (
   codeId: number
 ): UseInstantiateAndExecuteResult => {
   const { t } = useTranslation()
-  const { getSigningCosmWasmClient, address, chain } = useWallet({
+  const { getSigningClient, address, chain } = useWallet({
     chainId,
   })
 
   // Load checksum of the contract code.
-  const codeDetailsLoadable = useCachedLoadable(
+  const checksum = useCachedLoadingWithError(
     chainId
       ? codeDetailsSelector({
           chainId,
           codeId,
         })
-      : undefined
+      : undefined,
+    (data) => fromHex(data.checksum)
   )
 
   const instantiateAndExecute: InstantiateAndExecute = useCallback(
     async ({ instantiate, executes }) => {
-      if (codeDetailsLoadable.state !== 'hasValue') {
+      if (checksum.loading || checksum.errored) {
         throw new Error(t('error.loadingData'))
       }
 
@@ -80,18 +81,21 @@ export const useInstantiateAndExecute = (
         throw new Error(t('error.logInToContinue'))
       }
 
-      // Get the checksum of the contract code.
-      const checksum = fromHex(codeDetailsLoadable.contents.checksum)
+      // Ensure active chain is not Secret Network.
+      if (isSecretNetwork(chain.chain_id)) {
+        throw new Error('Secret Network does not support instantiate2.')
+      }
+
       // Random salt.
       const salt = uuidv4()
 
       const contractAddress = instantiate2Address(
-        checksum,
+        checksum.data,
         address,
         toUtf8(salt),
         chain.bech32_prefix
       )
-      const messages: CosmosMsgFor_Empty[] = [
+      const messages: UnifiedCosmosMsg[] = [
         // Instantiate the contract.
         makeWasmMessage({
           wasm: {
@@ -116,10 +120,12 @@ export const useInstantiateAndExecute = (
         ),
       ]
 
-      const signingCosmWasmClient = await getSigningCosmWasmClient()
-      const response = (await signingCosmWasmClient.signAndBroadcast(
+      const signingClient = await getSigningClient()
+      const response = (await signingClient.signAndBroadcast(
         address,
-        messages.map((msg) => cwMsgToEncodeObject(msg, address)),
+        messages.map((msg) =>
+          cwMsgToEncodeObject(chain.chain_id, msg, address)
+        ),
         CHAIN_GAS_MULTIPLIER
         // cosmos-kit has an older version of the package. This is a workaround.
       )) as DeliverTxResponse
@@ -129,11 +135,11 @@ export const useInstantiateAndExecute = (
         response,
       }
     },
-    [address, chain, codeDetailsLoadable, codeId, getSigningCosmWasmClient, t]
+    [address, chain, checksum, codeId, getSigningClient, t]
   )
 
   return {
-    ready: codeDetailsLoadable.state === 'hasValue' && !!address,
+    ready: !checksum.loading && !checksum.errored && !!address,
     instantiateAndExecute,
   }
 }

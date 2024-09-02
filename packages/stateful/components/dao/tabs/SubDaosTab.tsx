@@ -1,7 +1,7 @@
+import { useQueryClient } from '@tanstack/react-query'
+
 import {
   SubDaosTab as StatelessSubDaosTab,
-  useCachedLoading,
-  useChain,
   useDaoInfoContext,
   useDaoNavHelpers,
 } from '@dao-dao/stateless'
@@ -9,26 +9,25 @@ import { ActionKey, Feature } from '@dao-dao/types'
 import { getDaoProposalSinglePrefill } from '@dao-dao/utils'
 
 import { useActionForKey } from '../../../actions'
-import { useMembership } from '../../../hooks'
-import { subDaoCardInfosSelector } from '../../../recoil'
+import { useMembership, useQueryLoadingDataWithError } from '../../../hooks'
+import { daoQueries } from '../../../queries'
 import { ButtonLink } from '../../ButtonLink'
 import { DaoCard } from '../DaoCard'
 
 export const SubDaosTab = () => {
-  const { chain_id: chainId } = useChain()
-  const daoInfo = useDaoInfoContext()
+  const { chainId, coreAddress, supportedFeatures } = useDaoInfoContext()
   const { getDaoPath, getDaoProposalPath } = useDaoNavHelpers()
 
-  const { isMember = false } = useMembership(daoInfo)
+  const { isMember = false } = useMembership()
 
-  const subDaos = useCachedLoading(
-    daoInfo.supportedFeatures[Feature.SubDaos]
-      ? subDaoCardInfosSelector({ chainId, coreAddress: daoInfo.coreAddress })
-      : // Passing undefined here returns an infinite loading state, which is
-        // fine because it's never used.
-        undefined,
-    []
-  )
+  const queryClient = useQueryClient()
+  const subDaos = useQueryLoadingDataWithError({
+    ...daoQueries.subDaoInfos(queryClient, {
+      chainId,
+      coreAddress,
+    }),
+    enabled: !!supportedFeatures[Feature.SubDaos],
+  })
 
   const upgradeToV2Action = useActionForKey(ActionKey.UpgradeV1ToV2)
   const upgradeToV2ActionDefaults = upgradeToV2Action?.useDefaults()
@@ -37,10 +36,10 @@ export const SubDaosTab = () => {
     <StatelessSubDaosTab
       ButtonLink={ButtonLink}
       DaoCard={DaoCard}
-      createSubDaoHref={getDaoPath(daoInfo.coreAddress, 'create')}
+      createSubDaoHref={getDaoPath(coreAddress, 'create')}
       isMember={isMember}
       subDaos={subDaos}
-      upgradeToV2Href={getDaoProposalPath(daoInfo.coreAddress, 'create', {
+      upgradeToV2Href={getDaoProposalPath(coreAddress, 'create', {
         prefill: getDaoProposalSinglePrefill({
           actions: upgradeToV2Action
             ? [

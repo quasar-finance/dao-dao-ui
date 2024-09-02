@@ -15,14 +15,14 @@ import { useTranslation } from 'react-i18next'
 
 import { PopupTrigger } from '@dao-dao/types'
 
-import { useSearchFilter } from '../../hooks'
+import { useSearchFilter, useUpdatingRef } from '../../hooks'
 import { Button } from '../buttons/Button'
 import { SearchBar } from '../inputs/SearchBar'
 import { Modal } from '../modals'
 import { NoContent } from '../NoContent'
 import { TriggerRenderer } from './Popup'
 
-export interface FilterableItem {
+export type FilterableItem = {
   key: string | number
   Icon?: ComponentType<{ className?: string }>
   iconUrl?: string
@@ -35,9 +35,9 @@ export interface FilterableItem {
   contentContainerClassName?: string
 }
 
-export interface FilterableItemPopupProps<
+export type FilterableItemPopupProps<
   T extends FilterableItem = FilterableItem
-> {
+> = {
   trigger: PopupTrigger
   items: T[]
   filterableItemKeys: Fuse.FuseOptionKey<T>[]
@@ -102,8 +102,7 @@ export const FilterableItemPopup = <T extends FilterableItem>({
   }, [selectedIndex])
 
   // Memoize reference so that it doesn't change on every render.
-  const onSelectRef = useRef(onSelect)
-  onSelectRef.current = onSelect
+  const onSelectRef = useUpdatingRef(onSelect)
 
   const onSelectItem = useCallback(
     (item: T, originalIndex: number) => {
@@ -113,7 +112,7 @@ export const FilterableItemPopup = <T extends FilterableItem>({
         setOpen(false)
       }
     },
-    [closeOnSelect, setOpen]
+    [closeOnSelect, onSelectRef, setOpen]
   )
 
   const handleKeyPress = useCallback(

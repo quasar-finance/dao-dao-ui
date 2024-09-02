@@ -1,9 +1,7 @@
 import { Coin } from '@cosmjs/stargate'
 import JSON5 from 'json5'
-import { useCallback } from 'react'
+import { useCallback, useEffect } from 'react'
 import { useFormContext } from 'react-hook-form'
-import { useTranslation } from 'react-i18next'
-import { waitForAll } from 'recoil'
 
 import { genericTokenSelector } from '@dao-dao/state/recoil'
 import {
@@ -12,7 +10,7 @@ import {
   SwordsEmoji,
   useCachedLoadingWithError,
 } from '@dao-dao/stateless'
-import { CosmosMsgForEmpty, TokenType } from '@dao-dao/types'
+import { AccountType, TokenType, UnifiedCosmosMsg } from '@dao-dao/types'
 import {
   ActionComponent,
   ActionContextType,
@@ -22,18 +20,25 @@ import {
   UseDefaults,
   UseTransformToCosmos,
 } from '@dao-dao/types/actions'
+import { MsgExecuteContract as SecretMsgExecuteContract } from '@dao-dao/types/protobuf/codegen/secret/compute/v1beta1/msg'
 import {
+  bech32DataToAddress,
   convertDenomToMicroDenomStringWithDecimals,
-  convertDenomToMicroDenomWithDecimals,
   convertMicroDenomToDenomWithDecimals,
+  decodeIcaExecuteMsg,
+  decodeJsonFromBase64,
   decodePolytoneExecuteMsg,
-  encodeMessageAsBase64,
-  makeWasmMessage,
+  encodeJsonToBase64,
+  getAccountAddress,
+  isDecodedStargateMsg,
+  isSecretNetwork,
+  makeExecuteSmartContractMessage,
+  maybeMakeIcaExecuteMessage,
   maybeMakePolytoneExecuteMessage,
   objectMatchesStructure,
-  parseEncodedMessage,
 } from '@dao-dao/utils'
 
+import { useQueryTokens } from '../../../../hooks'
 import { useTokenBalances } from '../../../hooks'
 import { useActionOptions } from '../../../react'
 import {
@@ -41,13 +46,22 @@ import {
   ExecuteComponent as StatelessExecuteComponent,
 } from './Component'
 
+// Account types that are allowed to execute from.
+const ALLOWED_ACCOUNT_TYPES: readonly AccountType[] = [
+  AccountType.Native,
+  AccountType.Polytone,
+  AccountType.Ica,
+]
+
 const useDefaults: UseDefaults<ExecuteData> = () => {
   const {
     chain: { chain_id: chainId },
+    address,
   } = useActionOptions()
 
   return {
     chainId,
+    sender: address,
     address: '',
     message: '{}',
     funds: [],
@@ -56,103 +70,118 @@ const useDefaults: UseDefaults<ExecuteData> = () => {
 }
 
 const useTransformToCosmos: UseTransformToCosmos<ExecuteData> = () => {
-  const { t } = useTranslation()
-  const currentChainId = useActionOptions().chain.chain_id
-  const tokenBalances = useTokenBalances()
+  const {
+    address: currentAddress,
+    context,
+    chain: { chain_id: currentChainId },
+  } = useActionOptions()
 
   return useCallback(
-    ({ chainId, address, message, funds, cw20 }: ExecuteData) => {
-      let msg
-      try {
-        msg = JSON5.parse(message)
-      } catch (err) {
-        console.error(`internal error. unparsable message: (${message})`, err)
-        return
-      }
-
-      const fundsTokens = funds.map(({ denom }) =>
-        tokenBalances.loading
-          ? undefined
-          : tokenBalances.data.find(
-              ({ token }) =>
-                token.chainId === chainId && token.denomOrAddress === denom
-            )?.token
+    ({ chainId, sender, address, message, funds, cw20 }: ExecuteData) => {
+      const account = context.accounts.find(
+        (a) => a.chainId === chainId && a.address === sender
       )
-      const nonexistentFundsDenom = funds.find(
-        (_, index) => !fundsTokens[index]
-      )?.denom
-      if (nonexistentFundsDenom) {
-        throw new Error(
-          t('error.unknownDenom', {
-            denom: nonexistentFundsDenom,
-          })
-        )
+      if (!account) {
+        throw new Error('Instantiator account not found')
       }
 
-      let executeMsg: CosmosMsgForEmpty | undefined
+      const msg = JSON5.parse(message)
+
+      let executeMsg: UnifiedCosmosMsg | undefined
       if (cw20) {
-        if (funds.length !== 1 || fundsTokens.length !== 1) {
-          throw new Error(t('error.loadingData'))
+        if (funds.length !== 1) {
+          throw new Error('Missing CW20 fund denom.')
         }
 
         // Execute CW20 send message.
-        executeMsg = makeWasmMessage({
-          wasm: {
-            execute: {
-              contract_addr: fundsTokens[0]!.denomOrAddress,
-              funds: [],
-              msg: {
-                send: {
-                  amount: convertDenomToMicroDenomStringWithDecimals(
-                    funds[0].amount,
-                    fundsTokens[0]!.decimals
-                  ),
-                  contract: address,
-                  msg: encodeMessageAsBase64(msg),
-                },
-              },
+        const isSecret = isSecretNetwork(chainId)
+        executeMsg = makeExecuteSmartContractMessage({
+          chainId,
+          sender,
+          contractAddress: funds[0].denom,
+          msg: {
+            send: {
+              amount: convertDenomToMicroDenomStringWithDecimals(
+                funds[0].amount,
+                funds[0].decimals
+              ),
+              [isSecret ? 'recipient' : 'contract']: address,
+              msg: encodeJsonToBase64(msg),
+              ...(isSecret && {
+                padding: '',
+              }),
             },
           },
         })
       } else {
-        executeMsg = makeWasmMessage({
-          wasm: {
-            execute: {
-              contract_addr: address,
-              funds: funds.map(({ denom, amount }, index) => ({
-                denom,
-                amount: convertDenomToMicroDenomWithDecimals(
-                  amount,
-                  fundsTokens[index]!.decimals
-                ).toString(),
-              })),
-              msg,
-            },
-          },
+        executeMsg = makeExecuteSmartContractMessage({
+          chainId,
+          sender,
+          contractAddress: address,
+          msg,
+          funds: funds
+            .map(({ denom, amount, decimals }) => ({
+              denom,
+              amount: convertDenomToMicroDenomStringWithDecimals(
+                amount,
+                decimals
+              ),
+            }))
+            // Neutron errors with `invalid coins` if the funds list is not
+            // alphabetized.
+            .sort((a, b) => a.denom.localeCompare(b.denom)),
         })
       }
 
-      return maybeMakePolytoneExecuteMessage(
-        currentChainId,
-        chainId,
-        executeMsg
-      )
+      return account.type === AccountType.Polytone
+        ? maybeMakePolytoneExecuteMessage(
+            currentChainId,
+            account.chainId,
+            executeMsg
+          )
+        : account.type === AccountType.Ica
+        ? maybeMakeIcaExecuteMessage(
+            currentChainId,
+            account.chainId,
+            currentAddress,
+            account.address,
+            executeMsg
+          )
+        : executeMsg
     },
-    [currentChainId, t, tokenBalances]
+    [context.accounts, currentAddress, currentChainId]
   )
 }
 
 const useDecodedCosmosMsg: UseDecodedCosmosMsg<ExecuteData> = (
   msg: Record<string, any>
 ) => {
-  let chainId = useActionOptions().chain.chain_id
+  let {
+    chain: { chain_id: chainId },
+    address: sender,
+    context: { accounts },
+  } = useActionOptions()
   const decodedPolytone = decodePolytoneExecuteMsg(chainId, msg)
   if (decodedPolytone.match) {
     chainId = decodedPolytone.chainId
     msg = decodedPolytone.msg
+    sender =
+      getAccountAddress({
+        accounts,
+        chainId,
+        types: [AccountType.Polytone],
+      }) || ''
+  } else {
+    const decodedIca = decodeIcaExecuteMsg(chainId, msg)
+    if (decodedIca.match) {
+      chainId = decodedIca.chainId
+      // should never be undefined since we check for 1 message in the decoder
+      msg = decodedIca.msgWithSender?.msg || {}
+      sender = decodedIca.msgWithSender?.sender || ''
+    }
   }
 
-  const isExecute = objectMatchesStructure(msg, {
+  const isWasmExecute = objectMatchesStructure(msg, {
     wasm: {
       execute: {
         contract_addr: {},
@@ -162,68 +191,90 @@ const useDecodedCosmosMsg: UseDecodedCosmosMsg<ExecuteData> = (
     },
   })
 
+  const isSecretExecuteMsg =
+    isDecodedStargateMsg(msg) &&
+    msg.stargate.typeUrl === SecretMsgExecuteContract.typeUrl
+
+  const executeMsg = isWasmExecute
+    ? msg.wasm.execute.msg
+    : isSecretExecuteMsg
+    ? decodeJsonFromBase64(msg.stargate.value.msg)
+    : undefined
+
   // Check if a CW20 execute, which is a subset of execute.
-  const isCw20 = objectMatchesStructure(msg, {
-    wasm: {
-      execute: {
-        contract_addr: {},
-        funds: {},
-        msg: {
-          send: {
-            amount: {},
-            contract: {},
-            msg: {},
-          },
+  const isCw20 =
+    (isWasmExecute &&
+      objectMatchesStructure(executeMsg, {
+        send: {
+          amount: {},
+          contract: {},
+          msg: {},
         },
-      },
-    },
-  })
+      })) ||
+    (isSecretExecuteMsg &&
+      objectMatchesStructure(executeMsg, {
+        send: {
+          amount: {},
+          recipient: {},
+          msg: {},
+          padding: {},
+        },
+      }))
 
   const cw20Token = useCachedLoadingWithError(
     isCw20
       ? genericTokenSelector({
           chainId,
           type: TokenType.Cw20,
-          denomOrAddress: msg.wasm.execute.contract_addr,
+          denomOrAddress: isWasmExecute
+            ? msg.wasm.execute.contract_addr
+            : bech32DataToAddress(chainId, msg.stargate.value.contract),
         })
       : undefined
   )
 
-  const fundsTokens = useCachedLoadingWithError(
-    isExecute && !isCw20
-      ? waitForAll(
-          (msg.wasm.execute.funds as Coin[]).map(({ denom }) =>
-            genericTokenSelector({
-              chainId,
-              type: TokenType.Native,
-              denomOrAddress: denom,
-            })
-          )
-        )
+  const funds: Coin[] | undefined = isWasmExecute
+    ? msg.wasm.execute.funds
+    : isSecretExecuteMsg
+    ? msg.stargate.value.sentFunds
+    : undefined
+
+  const fundsTokens = useQueryTokens(
+    funds?.length && !isCw20
+      ? funds.map(({ denom }) => ({
+          chainId,
+          type: TokenType.Native,
+          denomOrAddress: denom,
+        }))
       : undefined
   )
 
   // Can't match until we have the token info.
   if (
+    (!isWasmExecute && !isSecretExecuteMsg) ||
     (isCw20 && (cw20Token.loading || cw20Token.errored)) ||
-    (!isCw20 && (fundsTokens.loading || fundsTokens.errored))
+    (!isCw20 && !!funds?.length && (fundsTokens.loading || fundsTokens.errored))
   ) {
     return { match: false }
   }
 
-  return isExecute
+  const cw20Decimals =
+    !cw20Token.loading && !cw20Token.errored ? cw20Token.data.decimals : 0
+
+  return isWasmExecute
     ? {
         match: true,
         data: {
           chainId,
+          sender,
           address: isCw20
-            ? msg.wasm.execute.msg.send.contract
+            ? executeMsg.send.contract
             : msg.wasm.execute.contract_addr,
           message: JSON.stringify(
             isCw20
-              ? parseEncodedMessage(msg.wasm.execute.msg.send.msg)
-              : msg.wasm.execute.msg,
-            undefined,
+              ? decodeJsonFromBase64(executeMsg.send.msg, true)
+              : executeMsg,
+            null,
             2
           ),
           funds: isCw20
@@ -231,28 +282,71 @@ const useDecodedCosmosMsg: UseDecodedCosmosMsg<ExecuteData> = (
                 {
                   denom: msg.wasm.execute.contract_addr,
                   amount: convertMicroDenomToDenomWithDecimals(
-                    msg.wasm.execute.msg.send.amount,
-                    !cw20Token.loading && !cw20Token.errored
-                      ? cw20Token.data.decimals
-                      : 0
+                    executeMsg.send.amount,
+                    cw20Decimals
                   ),
+                  decimals: cw20Decimals,
                 },
               ]
-            : !fundsTokens.loading && !fundsTokens.errored
-            ? (msg.wasm.execute.funds as Coin[]).map(
-                ({ denom, amount }, index) => ({
-                  denom,
-                  amount: convertMicroDenomToDenomWithDecimals(
-                    amount,
-                    fundsTokens.data[index].decimals
-                  ),
-                })
-              )
+            : !fundsTokens.loading && !fundsTokens.errored && funds
+            ? funds.map(({ denom, amount }, index) => ({
+                denom,
+                amount: convertMicroDenomToDenomWithDecimals(
+                  amount,
+                  fundsTokens.data[index].decimals
+                ),
+                decimals: fundsTokens.data[index].decimals,
+              }))
             : [],
           cw20: isCw20,
         },
       }
-    : { match: false }
+    : isSecretExecuteMsg
+    ? {
+        match: true,
+        data: {
+          chainId,
+          sender,
+          address: isCw20
+            ? executeMsg.send.recipient
+            : bech32DataToAddress(chainId, msg.stargate.value.contract),
+          message: JSON.stringify(
+            isCw20
+              ? decodeJsonFromBase64(executeMsg.send.msg, true)
+              : executeMsg,
+            null,
+            2
+          ),
+          funds: isCw20
+            ? [
+                {
+                  denom: bech32DataToAddress(
+                    chainId,
+                    msg.stargate.value.contract
+                  ),
+                  amount: convertMicroDenomToDenomWithDecimals(
+                    executeMsg.send.amount,
+                    cw20Decimals
+                  ),
+                  decimals: cw20Decimals,
+                },
+              ]
+            : !fundsTokens.loading && !fundsTokens.errored && funds
+            ? funds.map(({ denom, amount }, index) => ({
+                denom,
+                amount: convertMicroDenomToDenomWithDecimals(
+                  amount,
+                  fundsTokens.data[index].decimals
+                ),
+                decimals: fundsTokens.data[index].decimals,
+              }))
+            : [],
+          cw20: isCw20,
+        },
+      }
+    : {
+        match: false,
+      }
 }
 
 const Component: ActionComponent = (props) => {
@@ -260,10 +354,11 @@ const Component: ActionComponent = (props) => {
   const { watch, setValue } = useFormContext<ExecuteData>()
 
   const chainId = watch((props.fieldNamePrefix + 'chainId') as 'chainId')
+  const sender = watch((props.fieldNamePrefix + 'sender') as 'sender')
   const funds = watch((props.fieldNamePrefix + 'funds') as 'funds')
   const cw20 = watch((props.fieldNamePrefix + 'cw20') as 'cw20')
 
-  const balances = useTokenBalances({
+  const tokens = useTokenBalances({
     // Load selected tokens when not creating in case they are no longer
     // returned in the list of all tokens for the given DAO/wallet after the
     // proposal is made.
@@ -276,15 +371,44 @@ const Component: ActionComponent = (props) => {
         })),
   })
 
+  // If sender is not found in the list of accounts, reset to the first account
+  // on the target chain, or an empty account.
+  useEffect(() => {
+    if (
+      sender &&
+      !context.accounts.some(
+        (a) => a.chainId === chainId && a.address === sender
+      )
+    ) {
+      setValue(
+        (props.fieldNamePrefix + 'sender') as 'sender',
+        getAccountAddress({
+          accounts: context.accounts,
+          chainId,
+          types: ALLOWED_ACCOUNT_TYPES,
+        }) || ''
+      )
+    }
+  }, [chainId, context.accounts, props.fieldNamePrefix, sender, setValue])
+
   return (
     <>
       {context.type === ActionContextType.Dao && (
         <DaoSupportedChainPickerInput
           disabled={!props.isCreating}
           fieldName={props.fieldNamePrefix + 'chainId'}
-          onChange={() => {
+          onChange={(chainId) => {
             // Reset funds when switching chain.
             setValue((props.fieldNamePrefix + 'funds') as 'funds', [])
+            // Default sender to first matching account on new chain.
+            setValue(
+              (props.fieldNamePrefix + 'sender') as 'sender',
+              getAccountAddress({
+                accounts: context.accounts,
+                chainId,
+                types: ALLOWED_ACCOUNT_TYPES,
+              }) || ''
+            )
           }}
         />
       )}
@@ -293,12 +417,13 @@ const Component: ActionComponent = (props) => {
         <StatelessExecuteComponent
           {...props}
           options={{
-            balances: balances.loading
-              ? balances
+            tokens: tokens.loading
+              ? tokens
               : {
                   loading: false,
-                  data: balances.data.filter(
-                    ({ token }) => token.chainId === chainId
+                  data: tokens.data.filter(
+                    ({ token, owner }) =>
+                      token.chainId === chainId && owner.address === sender
                   ),
                 },
           }}

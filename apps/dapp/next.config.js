@@ -32,6 +32,8 @@ const config = {
   // Because @cosmos-kit/web3auth uses a Worker ESM import.
   experimental: {
     esmExternals: 'loose',
+    // Increase (to 1 MB) to allow for react-query pre-fetched hydration.
+    largePageDataBytes: 1 * 1024 * 1024,
   },
   webpack: (config) => {
     // @cosmos-kit/web3auth uses eccrypto, which uses `stream`. This needs to be
@@ -82,6 +84,38 @@ const config = {
         process.env.NEXT_PUBLIC_LEGACY_URL_PREFIX + '/multisig/:slug*',
       permanent: false,
     },
+    {
+      source: '/me/:slug*',
+      destination: '/:slug*',
+      permanent: false,
+    },
+    {
+      source: '/tx',
+      destination: '/actions',
+      permanent: false,
+    },
+    // Redirect all gov subpages to the dao subpage, but leave /gov alone.
+    {
+      source: '/gov/:chain/:slug*',
+      destination: '/dao/:chain/:slug*',
+      permanent: false,
+    },
+    // Rename Neutron proposal IDs from starting with N to A.
+    {
+      source:
+        '/dao/neutron1suhgf5svhu4usrurvxzlgn54ksxmn8gljarjtxqnapv8kjnp4nrstdxvff/proposals/N:slug',
+      destination:
+        '/dao/neutron1suhgf5svhu4usrurvxzlgn54ksxmn8gljarjtxqnapv8kjnp4nrstdxvff/proposals/A:slug',
+      permanent: true,
+    },
+    // Rename Neutron proposal IDs from starting with P to C.
+    {
+      source:
+        '/dao/neutron1suhgf5svhu4usrurvxzlgn54ksxmn8gljarjtxqnapv8kjnp4nrstdxvff/proposals/P:slug',
+      destination:
+        '/dao/neutron1suhgf5svhu4usrurvxzlgn54ksxmn8gljarjtxqnapv8kjnp4nrstdxvff/proposals/C:slug',
+      permanent: true,
+    },
   ],
   // Only upload source maps to Sentry in CI action when token is provided.
   sentry: {
@@ -91,13 +125,14 @@ const config = {
       process.env.CI !== 'true' || !process.env.SENTRY_AUTH_TOKEN,
   },
   images: {
+    unoptimized: true,
     domains: [
       'ipfs.stargaze.zone',
       'ipfs-gw.stargaze-apis.com',
       'i.stargaze-apis.com',
       'nftstorage.link',
       'ipfs.daodao.zone',
-      'img-proxy.ekez.workers.dev',
+      'img-proxy.daodao.zone',
       'raw.githubusercontent.com',
     ],
   },

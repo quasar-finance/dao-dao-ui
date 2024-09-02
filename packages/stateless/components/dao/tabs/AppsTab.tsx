@@ -16,6 +16,7 @@ import { useQuerySyncedState } from '../../../hooks'
 import { Button } from '../../buttons'
 import { IconButton } from '../../icon_buttons'
 import { TextInput } from '../../inputs'
+import { StatusCard } from '../../StatusCard'
 import { Tooltip } from '../../tooltip'
 
 export type AppsTabProps = {
@@ -69,7 +70,7 @@ const InnerAppsTab = ({
     setUrl(url)
   }
 
-  // On first iframe mount, go to url
+  // On first iframe mount, go to URL.
   useEffect(() => {
     try {
       if (iframe && (url === '' || (url && new URL(url).href))) {
@@ -79,6 +80,25 @@ const InnerAppsTab = ({
       // Ignore.
     }
   }, [iframe, url])
+
+  // Add event handler to inform iframe that it's wrapped in DAO DAO if it asks.
+  useEffect(() => {
+    if (!iframe?.contentWindow) {
+      return
+    }
+
+    const listener = ({ data }: MessageEvent) => {
+      if (data === 'isDaoDao') {
+        iframe.contentWindow?.postMessage('amDaoDao')
+      }
+    }
+
+    iframe.contentWindow.addEventListener('message', listener)
+
+    return () => {
+      iframe.contentWindow?.removeEventListener('message', listener)
+    }
+  }, [iframe])
 
   // Update the input field to match the URL if it changes in the parent
   // component. This should handle the URL being updated from the query params.
@@ -94,6 +114,8 @@ const InnerAppsTab = ({
   const selectedAppIndex = DAO_APPS.findIndex(
     ({ url: appUrl }) => appUrl === url || !appUrl
   )
+
+  const customSelected = !!url && selectedAppIndex === DAO_APPS.length - 1
 
   return (
     <div className={clsx('flex flex-col gap-2', className)}>
@@ -114,7 +136,7 @@ const InnerAppsTab = ({
                 'shrink-0 overflow-hidden border-2 !p-0 transition',
                 isCustom && 'border-dashed border-border-primary',
                 selected
-                  ? 'border-border-interactive-active'
+                  ? '!border-border-interactive-active'
                   : !isCustom && 'border-transparent'
               )}
               onClick={() => go(appUrl)}
@@ -145,6 +167,14 @@ const InnerAppsTab = ({
           )
         })}
       </div>
+
+      {customSelected && (
+        <StatusCard
+          className={clsx('mb-2', fullScreen && 'mx-safe-offset-4')}
+          content={t('info.customAppWarning')}
+          style="warning"
+        />
+      )}
 
       <div
         className={clsx(

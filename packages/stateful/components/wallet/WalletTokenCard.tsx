@@ -7,14 +7,19 @@ import {
   Visibility,
   VisibilityOff,
 } from '@mui/icons-material'
+import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useState } from 'react'
 import toast from 'react-hot-toast'
 import { useTranslation } from 'react-i18next'
 import { useSetRecoilState } from 'recoil'
 
 import {
+  chainQueries,
+  hiddenBalancesSelector,
   refreshHiddenBalancesAtom,
-  refreshNativeTokenStakingInfoAtom,
+  refreshTokenCardLazyInfoAtom,
+  temporaryHiddenBalancesAtom,
+  tokenCardLazyInfoSelector,
 } from '@dao-dao/state'
 import {
   ChainProvider,
@@ -22,13 +27,17 @@ import {
   useCachedLoadable,
   useCachedLoading,
 } from '@dao-dao/stateless'
-import { ActionKey, TokenCardInfo, TokenType } from '@dao-dao/types'
+import {
+  ActionKey,
+  TokenCardInfo,
+  TokenType,
+  cwMsgToEncodeObject,
+} from '@dao-dao/types'
 import {
   CHAIN_GAS_MULTIPLIER,
   HIDDEN_BALANCE_PREFIX,
   KVPK_API_BASE,
-  cwMsgToEncodeObject,
-  getMeTxPrefillPath,
+  getActionBuilderPrefillPath,
   getNativeTokenForChainId,
   getSupportedChainConfig,
   isNativeIbcUsdc,
@@ -38,14 +47,9 @@ import {
 import {
   useAwaitNextBlock,
   useCfWorkerAuthPostRequest,
+  useProfile,
   useWallet,
-  useWalletInfo,
 } from '../../hooks'
-import {
-  hiddenBalancesSelector,
-  temporaryHiddenBalancesAtom,
-  tokenCardLazyInfoSelector,
-} from '../../recoil'
 import { ButtonLink } from '../ButtonLink'
 import { EntityDisplay } from '../EntityDisplay'
 import { WalletFiatRampModal } from './WalletFiatRampModal'
@@ -53,16 +57,13 @@ import { WalletStakingModal } from './WalletStakingModal'
 
 export const WalletTokenCard = (props: TokenCardInfo) => {
   const { t } = useTranslation()
-  const nativeToken = getNativeTokenForChainId(props.token.chainId)
-  const {
-    address: walletAddress = '',
-    hexPublicKey,
-    getSigningCosmWasmClient,
-  } = useWallet({
-    chainId: props.token.chainId,
-    loadAccount: true,
-  })
-  const { refreshBalances } = useWalletInfo({
+  const { chains } = useProfile()
+
+  const profileChain = chains.loading
+    ? undefined
+    : chains.data.find((c) => c.chainId === props.token.chainId)
+
+  const { chainWallet, refreshBalances } = useWallet({
     chainId: props.token.chainId,
   })
 
@@ -80,16 +81,40 @@ export const WalletTokenCard = (props: TokenCardInfo) => {
   )
 
   // Refresh staking info.
-  const setRefreshNativeTokenStakingInfo = useSetRecoilState(
-    refreshNativeTokenStakingInfoAtom(walletAddress)
+  const setRefreshTokenCardLazyInfo = useSetRecoilState(
+    refreshTokenCardLazyInfoAtom({
+      token: props.token.source,
+      owner: props.owner.address,
+    })
   )
-  const refreshNativeTokenStakingInfo = useCallback(
-    () => setRefreshNativeTokenStakingInfo((id) => id + 1),
-    [setRefreshNativeTokenStakingInfo]
-  )
+  const queryClient = useQueryClient()
+  const refreshNativeTokenStakingInfo = useCallback(() => {
+    // Invalidate validators.
+    queryClient.invalidateQueries({
+      queryKey: ['chain', 'validator', { chainId: props.token.chainId }],
+    })
+    // Then native delegation info.
+    queryClient.invalidateQueries({
+      queryKey: chainQueries.nativeDelegationInfo(queryClient, {
+        chainId: props.token.chainId,
+        address: props.owner.address,
+      }).queryKey,
+    })
+    // Then token card lazy info.
+    setRefreshTokenCardLazyInfo((id) => id + 1)
+  }, [
+    props.owner.address,
+    props.token.chainId,
+    queryClient,
+    setRefreshTokenCardLazyInfo,
+  ])
 
   const { ready: hiddenBalancesReady, postRequest: postHiddenBalancesRequest } =
-    useCfWorkerAuthPostRequest(KVPK_API_BASE, 'Hidden Balances')
+    useCfWorkerAuthPostRequest(
+      KVPK_API_BASE,
+      'Hidden Balances',
+      props.token.chainId
+    )
 
   const setRefreshHidden = useSetRecoilState(refreshHiddenBalancesAtom)
   const refreshHidden = useCallback(
@@ -98,11 +123,11 @@ export const WalletTokenCard = (props: TokenCardInfo) => {
   )
 
   const setTemporaryHiddenBalances = useSetRecoilState(
-    temporaryHiddenBalancesAtom(hexPublicKey.loading ? '' : hexPublicKey.data)
+    temporaryHiddenBalancesAtom(profileChain?.publicKey.hex || '')
   )
   const hiddenBalancesLoadable = useCachedLoadable(
-    !hexPublicKey.loading
-      ? hiddenBalancesSelector(hexPublicKey.data)
+    profileChain
+      ? hiddenBalancesSelector(profileChain.publicKey.hex)
       : undefined
   )
   const isHidden =
@@ -115,6 +140,7 @@ export const WalletTokenCard = (props: TokenCardInfo) => {
   const setBalanceHidden = async (hidden: boolean) => {
     if (!hiddenBalancesReady) {
       toast.error(t('error.logInToContinue'))
+      return
     }
 
     setSavingHidden(true)
@@ -141,6 +167,7 @@ export const WalletTokenCard = (props: TokenCardInfo) => {
     }
   }
 
+  const nativeToken = getNativeTokenForChainId(props.token.chainId)
   const isNative =
     props.token.type === TokenType.Native &&
     props.token.denomOrAddress === nativeToken.denomOrAddress
@@ -164,19 +191,27 @@ export const WalletTokenCard = (props: TokenCardInfo) => {
     if (!claimReady) {
       return
     }
-    if (!walletAddress) {
+    if (!chainWallet) {
       toast.error(t('error.logInToContinue'))
       return
     }
 
     setClaimLoading(true)
     try {
-      const signingCosmWasmClient = await getSigningCosmWasmClient()
+      if (!chainWallet.isWalletConnected) {
+        await chainWallet.connect(false)
+      }
+      if (!chainWallet.address) {
+        throw new Error(t('error.logInToContinue'))
+      }
+
+      const signingCosmWasmClient = await chainWallet.getSigningStargateClient()
       await signingCosmWasmClient.signAndBroadcast(
-        walletAddress,
+        chainWallet.address,
         (lazyInfo.loading ? [] : lazyInfo.data.stakingInfo!.stakes).map(
           ({ validator }) =>
             cwMsgToEncodeObject(
+              chainWallet.chainId,
               {
                 distribution: {
                   withdraw_delegator_reward: {
@@ -184,7 +219,7 @@ export const WalletTokenCard = (props: TokenCardInfo) => {
                   },
                 },
               },
-              walletAddress
+              chainWallet.address!
             )
         ),
         CHAIN_GAS_MULTIPLIER
@@ -215,7 +250,7 @@ export const WalletTokenCard = (props: TokenCardInfo) => {
               Icon: PaymentRounded,
               label: t('button.spend'),
               closeOnClick: true,
-              href: getMeTxPrefillPath([
+              href: getActionBuilderPrefillPath([
                 {
                   actionKey: ActionKey.Spend,
                   data: {

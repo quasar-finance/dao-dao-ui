@@ -13,7 +13,11 @@ import {
   DaoSupportedChainPickerInput,
   Loader,
 } from '@dao-dao/stateless'
-import { ChainId } from '@dao-dao/types'
+import {
+  ChainId,
+  cwVoteOptionToGovVoteOption,
+  govVoteOptionToCwVoteOption,
+} from '@dao-dao/types'
 import {
   ActionComponent,
   ActionContextType,
@@ -24,20 +28,18 @@ import {
   UseTransformToCosmos,
 } from '@dao-dao/types/actions'
 import {
-  cwVoteOptionToGovVoteOption,
+  ProposalStatus,
+  VoteOption,
+} from '@dao-dao/types/protobuf/codegen/cosmos/gov/v1beta1/gov'
+import { MsgVote } from '@dao-dao/types/protobuf/codegen/cosmos/gov/v1beta1/tx'
+import {
   decodePolytoneExecuteMsg,
   getChainAddressForActionOptions,
-  govVoteOptionToCwVoteOption,
   isDecodedStargateMsg,
   loadableToLoadingData,
   maybeMakePolytoneExecuteMessage,
   objectMatchesStructure,
 } from '@dao-dao/utils'
-import {
-  ProposalStatus,
-  VoteOption,
-} from '@dao-dao/utils/protobuf/codegen/cosmos/gov/v1beta1/gov'
-import { MsgVote } from '@dao-dao/utils/protobuf/codegen/cosmos/gov/v1beta1/tx'
 
 import {
   GovProposalActionDisplay,
@@ -138,12 +140,12 @@ const Component: ActionComponent<undefined, GovernanceVoteData> = (props) => {
         />
       )}
 
-      <SuspenseLoader
-        fallback={<Loader />}
-        forceFallback={openProposalsLoadable.state !== 'hasValue'}
-      >
-        <ChainProvider chainId={chainId}>
-          <GovActionsProvider>
+      <ChainProvider chainId={chainId}>
+        <GovActionsProvider>
+          <SuspenseLoader
+            fallback={<Loader />}
+            forceFallback={openProposalsLoadable.state !== 'hasValue'}
+          >
             <StatelessGovernanceVoteComponent
               {...props}
               options={{
@@ -158,9 +160,9 @@ const Component: ActionComponent<undefined, GovernanceVoteData> = (props) => {
                 GovProposalActionDisplay,
               }}
             />
-          </GovActionsProvider>
-        </ChainProvider>
-      </SuspenseLoader>
+          </SuspenseLoader>
+        </GovActionsProvider>
+      </ChainProvider>
     </>
   )
 }
@@ -174,7 +176,8 @@ export const makeGovernanceVoteAction: ActionMaker<GovernanceVoteData> = ({
     // Governance module cannot participate in governance.
     context.type === ActionContextType.Gov ||
     // Neutron does not use the x/gov module.
-    currentChainId === ChainId.NeutronMainnet
+    currentChainId === ChainId.NeutronMainnet ||
+    currentChainId === ChainId.NeutronTestnet
   ) {
     return null
   }

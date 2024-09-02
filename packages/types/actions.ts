@@ -1,17 +1,19 @@
 // eslint-disable-next-line regex/invalid
 import { Chain } from '@chain-registry/types'
-import { ComponentType } from 'react'
+import { ComponentType, ReactNode } from 'react'
 import { FieldErrors } from 'react-hook-form'
 import { TFunction } from 'react-i18next'
 
+import { Account } from './account'
 import {
   ConfiguredChainContext,
   IChainContext,
   SupportedChainContext,
 } from './chain'
-import { CosmosMsgFor_Empty } from './contracts/common'
-import { DaoInfo } from './dao'
+import { IDaoBase } from './clients'
+import { UnifiedCosmosMsg } from './contracts/common'
 import { AllGovParams } from './gov'
+import { UnifiedProfile } from './profile'
 
 export enum ActionCategoryKey {
   CommonlyUsed = 'commonlyUsed',
@@ -19,8 +21,10 @@ export enum ActionCategoryKey {
   ChainGovernance = 'chainGovernance',
   DaoAppearance = 'daoAppearance',
   DaoGovernance = 'daoGovernance',
+  SubDaos = 'subDaos',
   SmartContracting = 'smartContracting',
   Treasury = 'treasury',
+  Rebalancer = 'rebalancer',
   Nfts = 'nfts',
   Press = 'press',
   Advanced = 'advanced',
@@ -80,10 +84,28 @@ export enum ActionKey {
   ManageSubDaoPause = 'manageSubDaoPause',
   UpdatePreProposeConfig = 'updatePreProposeConfig',
   UpdateProposalConfig = 'updateProposalConfig',
+  MigrateMigalooV4TokenFactory = 'migrateMigalooV4TokenFactory',
+  CreateDao = 'createDao',
+  // Valence
+  CreateValenceAccount = 'createValenceAccount',
+  ConfigureRebalancer = 'configureRebalancer',
+  PauseRebalancer = 'pauseRebalancer',
+  ResumeRebalancer = 'resumeRebalancer',
+  FundRebalancer = 'fundRebalancer',
+  WithdrawFromRebalancer = 'withdrawFromRebalancer',
+  // DaoProposalSingle
+  UpdatePreProposeSingleConfig = 'updatePreProposeSingleConfig',
+  UpdateProposalSingleConfig = 'updateProposalSingleConfig',
+  // DaoProposalMultiple
+  UpdatePreProposeMultipleConfig = 'updatePreProposeMultipleConfig',
+  UpdateProposalMultipleConfig = 'updateProposalMultipleConfig',
   // Press
   CreatePost = 'createPost',
   UpdatePost = 'updatePost',
   DeletePost = 'deletePost',
+  // Become SubDAO
+  AcceptSubDao = 'acceptSubDao',
+  BecomeSubDao = 'becomeSubDao',
 }
 
 export type ActionAndData = {
@@ -146,7 +168,7 @@ export type UseDefaults<D extends {} = any> = () => D | Error | undefined
 
 export type UseTransformToCosmos<D extends {} = any> = () => (
   data: D
-) => CosmosMsgFor_Empty | undefined
+) => UnifiedCosmosMsg | undefined
 
 export interface DecodeCosmosMsgNoMatch {
   match: false
@@ -190,9 +212,15 @@ export interface Action<Data extends {} = any, Options extends {} = any> {
   // and `notReusable`, while also preventing the user from going back to the
   // category action picker or removing the action.
   programmaticOnly?: boolean
+  /**
+   * Order of this action in the list of actions. A greater number will be shown
+   * first. If no order specified, actions will be sorted based on their
+   * position in the category definition.
+   */
+  order?: number
   // Hook to get default fields for form display.
   useDefaults: UseDefaults<Data>
-  // Hook to make function to convert action data to CosmosMsgFor_Empty.
+  // Hook to make function to convert action data to UnifiedCosmosMsg.
   useTransformToCosmos: UseTransformToCosmos<Data>
   // Hook to make function to convert decoded msg to form display fields.
   useDecodedCosmosMsg: UseDecodedCosmosMsg<Data>
@@ -227,18 +255,23 @@ export enum ActionContextType {
   Gov = 'gov',
 }
 
-export type ActionContext =
+export type ActionContext = (
   | {
       type: ActionContextType.Dao
-      info: DaoInfo
+      dao: IDaoBase
     }
   | {
       type: ActionContextType.Wallet
+      profile: UnifiedProfile
     }
   | {
       type: ActionContextType.Gov
       params: AllGovParams
     }
+) & {
+  // All contexts should have a list of accounts.
+  accounts: Account[]
+}
 
 export enum ActionChainContextType {
   /**
@@ -320,8 +353,24 @@ export type LoadedAction = {
 export type LoadedActions = Partial<Record<ActionKey, LoadedAction>>
 
 export type NestedActionsEditorFormData = {
-  msgs: CosmosMsgFor_Empty[]
+  msgs: UnifiedCosmosMsg[]
 
   // Internal action data so that errors are added to main form.
   _actionData?: ActionKeyAndData[]
+}
+
+export type ActionsProviderProps = {
+  children: ReactNode | ReactNode[]
+}
+
+export type WalletActionsProviderProps = ActionsProviderProps & {
+  // If passed, will override the connected wallet address.
+  address?: string
+}
+
+export type GovActionsProviderProps = ActionsProviderProps & {
+  /**
+   * Optionally override loader node.
+   */
+  loader?: ReactNode
 }

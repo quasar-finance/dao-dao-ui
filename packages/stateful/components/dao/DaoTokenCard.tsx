@@ -3,12 +3,17 @@ import {
   ArchiveRounded,
   PaidRounded,
 } from '@mui/icons-material'
+import { useQueryClient } from '@tanstack/react-query'
 import { useRouter } from 'next/router'
 import { useCallback, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSetRecoilState } from 'recoil'
 
-import { refreshNativeTokenStakingInfoAtom } from '@dao-dao/state'
+import {
+  chainQueries,
+  refreshTokenCardLazyInfoAtom,
+  tokenCardLazyInfoSelector,
+} from '@dao-dao/state'
 import {
   ChainProvider,
   TokenCard as StatelessTokenCard,
@@ -30,7 +35,6 @@ import {
   tokensEqual,
 } from '@dao-dao/utils'
 
-import { tokenCardLazyInfoSelector } from '../../recoil'
 import { useVotingModuleAdapter } from '../../voting-module-adapter'
 import { ButtonLink } from '../ButtonLink'
 import { EntityDisplay } from '../EntityDisplay'
@@ -71,13 +75,28 @@ export const DaoTokenCard = ({
     !!governanceTokenInfo && tokensEqual(token, governanceTokenInfo)
 
   // Refresh staking info.
-  const setRefreshNativeTokenStakingInfo = useSetRecoilState(
-    refreshNativeTokenStakingInfoAtom(owner.address)
+  const setRefreshTokenCardLazyInfo = useSetRecoilState(
+    refreshTokenCardLazyInfoAtom({
+      token: token.source,
+      owner: owner.address,
+    })
   )
-  const refreshNativeTokenStakingInfo = useCallback(
-    () => setRefreshNativeTokenStakingInfo((id) => id + 1),
-    [setRefreshNativeTokenStakingInfo]
-  )
+  const queryClient = useQueryClient()
+  const refreshNativeTokenStakingInfo = useCallback(() => {
+    // Invalidate validators.
+    queryClient.invalidateQueries({
+      queryKey: ['chain', 'validator', { chainId: owner.chainId }],
+    })
+    // Then native delegation info.
+    queryClient.invalidateQueries({
+      queryKey: chainQueries.nativeDelegationInfo(queryClient, {
+        chainId: owner.chainId,
+        address: owner.address,
+      }).queryKey,
+    })
+    // Then token card lazy info.
+    setRefreshTokenCardLazyInfo((id) => id + 1)
+  }, [owner.address, owner.chainId, queryClient, setRefreshTokenCardLazyInfo])
 
   const lazyStakes = lazyInfo.loading
     ? []

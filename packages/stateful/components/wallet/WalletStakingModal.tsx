@@ -1,13 +1,12 @@
 import { coin } from '@cosmjs/stargate'
+import { useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import toast from 'react-hot-toast'
 import { useTranslation } from 'react-i18next'
-import { useSetRecoilState } from 'recoil'
 
+import { chainQueries } from '@dao-dao/state/query'
 import {
-  nativeDelegationInfoSelector,
   nativeUnstakingDurationSecondsSelector,
-  refreshWalletBalancesIdAtom,
   validatorsSelector,
 } from '@dao-dao/state/recoil'
 import {
@@ -17,15 +16,20 @@ import {
   useCachedLoadable,
   useChainContext,
 } from '@dao-dao/stateless'
+import { cwMsgToEncodeObject } from '@dao-dao/types'
 import {
   CHAIN_GAS_MULTIPLIER,
   convertDenomToMicroDenomStringWithDecimals,
   convertMicroDenomToDenomWithDecimals,
-  cwMsgToEncodeObject,
   processError,
 } from '@dao-dao/utils'
 
-import { useAwaitNextBlock, useWallet, useWalletInfo } from '../../hooks'
+import {
+  useAwaitNextBlock,
+  useQueryLoadingData,
+  useQueryLoadingDataWithError,
+  useWallet,
+} from '../../hooks'
 
 export type WalletStakingModalProps = Pick<
   StakingModalProps,
@@ -39,16 +43,29 @@ export const WalletStakingModal = (props: WalletStakingModalProps) => {
     chain: { chain_id: chainId },
     nativeToken,
   } = useChainContext()
-  const { address: walletAddress = '', getSigningCosmWasmClient } = useWallet()
+  const {
+    address: walletAddress = '',
+    getSigningStargateClient,
+    refreshBalances,
+  } = useWallet()
 
   if (!nativeToken) {
     throw new Error(t('error.missingNativeToken'))
   }
 
-  const { walletBalance, refreshBalances } = useWalletInfo()
-  // Refreshes validator balances.
-  const setRefreshValidatorBalances = useSetRecoilState(
-    refreshWalletBalancesIdAtom('')
+  // Fetch wallet balance.
+  const loadingStakableTokens = useQueryLoadingData(
+    walletAddress
+      ? chainQueries.nativeBalance({
+          chainId,
+          address: walletAddress,
+        })
+      : undefined,
+    0,
+    {
+      transform: ({ amount }) =>
+        convertMicroDenomToDenomWithDecimals(amount, nativeToken.decimals),
+    }
   )
 
   const awaitNextBlock = useAwaitNextBlock()
@@ -67,29 +84,28 @@ export const WalletStakingModal = (props: WalletStakingModalProps) => {
     })
   )
 
-  const nativeDelegationInfo = useCachedLoadable(
-    nativeDelegationInfoSelector({
+  const queryClient = useQueryClient()
+  const loadingStakes = useQueryLoadingDataWithError(
+    chainQueries.nativeDelegationInfo(queryClient, {
       address: walletAddress,
       chainId,
-    })
+    }),
+    ({ delegations }) =>
+      delegations.map(({ validator, delegated, pendingReward }) => ({
+        token: nativeToken,
+        validator,
+        amount: convertMicroDenomToDenomWithDecimals(
+          delegated.amount,
+          nativeToken.decimals
+        ),
+        rewards: convertMicroDenomToDenomWithDecimals(
+          pendingReward.amount,
+          nativeToken.decimals
+        ),
+      }))
   )
   const stakes =
-    nativeDelegationInfo.state === 'hasValue' && nativeDelegationInfo.contents
-      ? nativeDelegationInfo.contents.delegations.map(
-          ({ validator, delegated, pendingReward }) => ({
-            token: nativeToken,
-            validator,
-            amount: convertMicroDenomToDenomWithDecimals(
-              delegated.amount,
-              nativeToken.decimals
-            ),
-            rewards: convertMicroDenomToDenomWithDecimals(
-              pendingReward.amount,
-              nativeToken.decimals
-            ),
-          })
-        )
-      : []
+    !loadingStakes.loading && !loadingStakes.errored ? loadingStakes.data : []
 
   const onAction = async (
     mode: StakingMode,
@@ -108,7 +124,7 @@ export const WalletStakingModal = (props: WalletStakingModalProps) => {
 
     setLoading(true)
     try {
-      const signingCosmWasmClient = await getSigningCosmWasmClient()
+      const signingClient = await getSigningStargateClient()
 
       const microAmount = convertDenomToMicroDenomStringWithDecimals(
         amount,
@@ -116,10 +132,11 @@ export const WalletStakingModal = (props: WalletStakingModalProps) => {
       )
 
       if (mode === StakingMode.Stake) {
-        await signingCosmWasmClient.signAndBroadcast(
+        await signingClient.signAndBroadcast(
           walletAddress,
           [
             cwMsgToEncodeObject(
+              chainId,
               {
                 staking: {
                   delegate: {
@@ -134,10 +151,11 @@ export const WalletStakingModal = (props: WalletStakingModalProps) => {
           CHAIN_GAS_MULTIPLIER
         )
       } else if (mode === StakingMode.Unstake) {
-        await signingCosmWasmClient.signAndBroadcast(
+        await signingClient.signAndBroadcast(
           walletAddress,
           [
             cwMsgToEncodeObject(
+              chainId,
               {
                 staking: {
                   undelegate: {
@@ -155,7 +173,6 @@ export const WalletStakingModal = (props: WalletStakingModalProps) => {
 
       // Wait a block for balances to update.
       await awaitNextBlock()
-      setRefreshValidatorBalances((id) => id + 1)
       refreshBalances()
 
       toast.success(
@@ -179,14 +196,7 @@ export const WalletStakingModal = (props: WalletStakingModalProps) => {
       }
       initialMode={StakingMode.Stake}
       loading={loading}
-      loadingStakableTokens={
-        walletBalance === undefined
-          ? { loading: true }
-          : {
-              loading: false,
-              data: walletBalance,
-            }
-      }
+      loadingStakableTokens={loadingStakableTokens}
       onAction={onAction}
       setAmount={setAmount}
       token={nativeToken}

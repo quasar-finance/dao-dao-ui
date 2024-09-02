@@ -1,6 +1,6 @@
 import { ArrowDropDown, VisibilityRounded } from '@mui/icons-material'
 import cloneDeep from 'lodash.clonedeep'
-import { ComponentType, useCallback, useEffect, useRef } from 'react'
+import { ComponentType, useCallback, useEffect } from 'react'
 import { useFormContext } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 
@@ -11,9 +11,12 @@ import {
   Loader,
   SegmentedControlsTitle,
   Tooltip,
+  useUpdatingRef,
 } from '@dao-dao/stateless'
 import { DaoWidget, SuspenseLoaderProps, Widget } from '@dao-dao/types'
 import { ActionComponent } from '@dao-dao/types/actions'
+
+import { useActionOptions } from '../../../react'
 
 export type ManageWidgetsData = {
   mode: 'set' | 'delete'
@@ -40,6 +43,7 @@ export const ManageWidgetsComponent: ActionComponent<ManageWidgetsOptions> = (
 
   const { t } = useTranslation()
   const { setValue, watch, clearErrors } = useFormContext<ManageWidgetsData>()
+  const actionOptions = useActionOptions()
 
   const mode = watch((fieldNamePrefix + 'mode') as 'mode')
   const widgetId = watch((fieldNamePrefix + 'id') as 'id')
@@ -47,8 +51,7 @@ export const ManageWidgetsComponent: ActionComponent<ManageWidgetsOptions> = (
   const widget = availableWidgets.find((widget) => widget.id === widgetId)
 
   // Memoize so the callbacks don't infinite loop.
-  const existingWidgetsRef = useRef(existingWidgets)
-  existingWidgetsRef.current = existingWidgets
+  const existingWidgetsRef = useUpdatingRef(existingWidgets)
 
   const selectWidget = useCallback(
     ({ id, defaultValues }: Widget) => {
@@ -67,7 +70,7 @@ export const ManageWidgetsComponent: ActionComponent<ManageWidgetsOptions> = (
       // previous widget.
       clearErrors((fieldNamePrefix + 'values') as 'values')
     },
-    [clearErrors, fieldNamePrefix, setValue]
+    [clearErrors, existingWidgetsRef, fieldNamePrefix, setValue]
   )
 
   // When creating, if mode set to 'set', select the first available widget. If
@@ -97,6 +100,7 @@ export const ManageWidgetsComponent: ActionComponent<ManageWidgetsOptions> = (
     availableWidgets,
     isCreating,
     widgetId,
+    existingWidgetsRef,
   ])
 
   return (
@@ -186,9 +190,12 @@ export const ManageWidgetsComponent: ActionComponent<ManageWidgetsOptions> = (
               <div className="flex flex-col gap-4">
                 <widget.Editor
                   {...props}
+                  accounts={actionOptions.context.accounts}
                   data={props.data.values}
                   errors={errors?.values}
                   fieldNamePrefix={fieldNamePrefix + 'values.'}
+                  options={actionOptions}
+                  type="action"
                 />
               </div>
             </SuspenseLoader>
@@ -210,8 +217,11 @@ export const ManageWidgetsComponent: ActionComponent<ManageWidgetsOptions> = (
               <div className="flex flex-col gap-4">
                 <widget.Editor
                   {...props}
+                  accounts={actionOptions.context.accounts}
                   data={props.data.values}
                   fieldNamePrefix={fieldNamePrefix + 'values.'}
+                  options={actionOptions}
+                  type="action"
                 />
               </div>
             </SuspenseLoader>

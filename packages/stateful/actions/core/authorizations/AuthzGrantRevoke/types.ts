@@ -1,13 +1,13 @@
-import { GenericAuthorization } from '@dao-dao/utils/protobuf/codegen/cosmos/authz/v1beta1/authz'
-import { SendAuthorization } from '@dao-dao/utils/protobuf/codegen/cosmos/bank/v1beta1/authz'
-import { MsgSend } from '@dao-dao/utils/protobuf/codegen/cosmos/bank/v1beta1/tx'
-import { MsgWithdrawDelegatorReward } from '@dao-dao/utils/protobuf/codegen/cosmos/distribution/v1beta1/tx'
-import { MsgVote } from '@dao-dao/utils/protobuf/codegen/cosmos/gov/v1beta1/tx'
+import { GenericAuthorization } from '@dao-dao/types/protobuf/codegen/cosmos/authz/v1beta1/authz'
+import { SendAuthorization } from '@dao-dao/types/protobuf/codegen/cosmos/bank/v1beta1/authz'
+import { MsgSend } from '@dao-dao/types/protobuf/codegen/cosmos/bank/v1beta1/tx'
+import { MsgWithdrawDelegatorReward } from '@dao-dao/types/protobuf/codegen/cosmos/distribution/v1beta1/tx'
+import { MsgVote } from '@dao-dao/types/protobuf/codegen/cosmos/gov/v1beta1/tx'
 import {
   MsgBeginRedelegate,
   MsgDelegate,
   MsgUndelegate,
-} from '@dao-dao/utils/protobuf/codegen/cosmos/staking/v1beta1/tx'
+} from '@dao-dao/types/protobuf/codegen/cosmos/staking/v1beta1/tx'
 import {
   AcceptedMessageKeysFilter,
   AcceptedMessagesFilter,
@@ -17,11 +17,12 @@ import {
   ContractMigrationAuthorization,
   MaxCallsLimit,
   MaxFundsLimit,
-} from '@dao-dao/utils/protobuf/codegen/cosmwasm/wasm/v1/authz'
+} from '@dao-dao/types/protobuf/codegen/cosmwasm/wasm/v1/authz'
 import {
   MsgExecuteContract,
   MsgMigrateContract,
-} from '@dao-dao/utils/protobuf/codegen/cosmwasm/wasm/v1/tx'
+  MsgStoreCode,
+} from '@dao-dao/types/protobuf/codegen/cosmwasm/wasm/v1/tx'
 
 export type AuthzGrantRevokeData = {
   chainId: string
@@ -30,7 +31,12 @@ export type AuthzGrantRevokeData = {
   customTypeUrl: boolean
   grantee: string
   contract: string
-  funds: { denom: string; amount: number }[]
+  funds: {
+    denom: string
+    amount: number
+    // Will multiply `amount` by 10^decimals when generating the message.
+    decimals: number
+  }[]
   msgTypeUrl: string
   filterTypeUrl: string
   filterKeys: string
@@ -71,6 +77,10 @@ export const ACTION_TYPES = [
   {
     type: MsgMigrateContract,
     i18nKey: 'title.migrateSmartContract',
+  },
+  {
+    type: MsgStoreCode,
+    i18nKey: 'title.uploadSmartContractCode',
   },
 ]
 

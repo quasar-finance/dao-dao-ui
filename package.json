@@ -1,12 +1,11 @@
 {
   "name": "dao-dao-ui",
-  "version": "2.2.0",
+  "version": "2.5.0-rc.2",
   "workspaces": [
     "apps/*",
     "packages/*"
   ],
   "scripts": {
-    "postinstall": "patch-package",
     "build": "turbo run build --continue --filter=\"!@dao-dao/storybook\"",
     "build:no-apps": "turbo run build --continue --filter=\"!@dao-dao/storybook\" --filter=\"!@dao-dao/dapp\" --filter=\"!@dao-dao/sda\"",
     "dev": "yarn dapp dev",
@@ -14,6 +13,8 @@
     "format": "prettier --write \"**/*.{css,json,md}\" && turbo run format --continue --parallel",
     "lint": "prettier --check \"**/*.{css,json,md}\" && turbo run lint --continue --parallel",
     "test": "jest",
+    "test:e2e": "yarn dapp test:e2e",
+    "cwgen": "yarn workspace @dao-dao/config cwgen",
     "dapp": "yarn workspace @dao-dao/dapp",
     "sda": "yarn workspace @dao-dao/sda",
     "i18n": "yarn workspace @dao-dao/i18n",
@@ -24,13 +25,13 @@
     "types": "yarn workspace @dao-dao/types",
     "utils": "yarn workspace @dao-dao/utils",
     "email": "yarn workspace @dao-dao/email",
-    "publish-all": "lerna publish --no-private from-package"
+    "dispatch": "yarn workspace @dao-dao/dispatch",
+    "publish-all": "find . -name '*.log' -delete && lerna publish --no-private from-package"
   },
   "devDependencies": {
     "@types/jest": "^29.5.0",
     "jest": "^29.5.0",
     "lerna": "^6.4.1",
-    "patch-package": "^8.0.0",
     "ts-jest": "^29.0.5",
     "turbo": "latest",
     "turbo-ignore": "latest"

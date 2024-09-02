@@ -7,7 +7,7 @@ import {
 } from '@mui/icons-material'
 import clsx from 'clsx'
 import Fuse from 'fuse.js'
-import { ComponentType, useEffect, useState } from 'react'
+import { ComponentType, useState } from 'react'
 import {
   FieldValues,
   SubmitErrorHandler,
@@ -30,6 +30,7 @@ import {
   processError,
 } from '@dao-dao/utils'
 
+import { useHoldingKey } from '../../hooks'
 import { Button } from '../buttons'
 import { IconButton } from '../icon_buttons'
 import { FilterableItem, FilterableItemPopup } from '../popup'
@@ -67,7 +68,10 @@ export type NewProposalProps<
   isActive: boolean
   activeThreshold: ActiveThreshold | null
   isMember: LoadingData<boolean>
-  anyoneCanPropose: boolean
+  /**
+   * If defined, this is the reason why the user cannot propose.
+   */
+  cannotProposeReason?: string
   depositUnsatisfied: boolean
   connected: boolean
   simulationBypassExpiration?: Date
@@ -89,7 +93,7 @@ export const NewProposal = <
   isActive,
   activeThreshold,
   isMember,
-  anyoneCanPropose,
+  cannotProposeReason,
   depositUnsatisfied,
   connected,
   draft,
@@ -111,45 +115,8 @@ export const NewProposal = <
   const [showPreview, setShowPreview] = useState(false)
   const [submitError, setSubmitError] = useState('')
 
-  const [holdingAltForSimulation, setHoldingAltForSimulation] = useState(false)
-  const [holdingShiftForForce, setHoldingShiftForForce] = useState(false)
-  // Unset holding alt/shift after 3 seconds, in case it got stuck.
-  useEffect(() => {
-    if (holdingAltForSimulation) {
-      const timeout = setTimeout(() => setHoldingAltForSimulation(false), 3000)
-      return () => clearTimeout(timeout)
-    }
-  }, [holdingAltForSimulation])
-  useEffect(() => {
-    if (holdingShiftForForce) {
-      const timeout = setTimeout(() => setHoldingShiftForForce(false), 3000)
-      return () => clearTimeout(timeout)
-    }
-  }, [holdingShiftForForce])
-  // Detect keys.
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Alt') {
-        setHoldingAltForSimulation(true)
-      } else if (event.key === 'Shift') {
-        setHoldingShiftForForce(true)
-      }
-    }
-    const handleKeyUp = (event: KeyboardEvent) => {
-      if (event.key === 'Alt') {
-        setHoldingAltForSimulation(false)
-      } else if (event.key === 'Shift') {
-        setHoldingShiftForForce(false)
-      }
-    }
-
-    document.addEventListener('keydown', handleKeyDown)
-    document.addEventListener('keyup', handleKeyUp)
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown)
-      document.removeEventListener('keyup', handleKeyUp)
-    }
-  }, [])
+  const holdingAltForSimulation = useHoldingKey({ key: 'alt' })
+  const holdingShiftForForce = useHoldingKey({ key: 'shift' })
 
   const onSubmitForm: SubmitHandler<FormData> = (formData, event) => {
     setSubmitError('')
@@ -216,7 +183,7 @@ export const NewProposal = <
 
       createProposal(data)
 
-      // If not simulating or creating, show error to check for errors.
+      // If not simulating or forcing, show error to check for errors.
     } else {
       setSubmitError(t('error.correctErrorsAbove'))
     }
@@ -303,9 +270,7 @@ export const NewProposal = <
                   // simulating.
                   (!holdingAltForSimulation &&
                     (!connected ||
-                      (!anyoneCanPropose &&
-                        !isMember.loading &&
-                        !isMember.data) ||
+                      !!cannotProposeReason ||
                       depositUnsatisfied ||
                       isPaused ||
                       !isActive)) ||
@@ -356,14 +321,11 @@ export const NewProposal = <
           </div>
         </div>
 
-        {!anyoneCanPropose &&
-          !isMember.loading &&
-          !isMember.data &&
-          !isWalletConnecting && (
-            <p className="secondary-text max-w-prose self-end text-right text-text-interactive-error">
-              {t('error.mustBeMemberToCreateProposal')}
-            </p>
-          )}
+        {!!cannotProposeReason && !isMember.loading && !isWalletConnecting && (
+          <p className="secondary-text max-w-prose self-end text-right text-text-interactive-error">
+            {cannotProposeReason}
+          </p>
+        )}
 
         {simulationBypassExpiration && (
           <p className="secondary-text max-w-prose self-end text-right text-text-interactive-warning-body">

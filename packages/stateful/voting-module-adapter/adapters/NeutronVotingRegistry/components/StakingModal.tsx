@@ -1,12 +1,13 @@
 import { coins } from '@cosmjs/stargate'
+import { useQueries } from '@tanstack/react-query'
 import { useCallback, useState } from 'react'
 import toast from 'react-hot-toast'
 import { useTranslation } from 'react-i18next'
 import { useRecoilState, useSetRecoilState, waitForAll } from 'recoil'
 
 import {
-  NeutronVaultSelectors,
   genericTokenBalanceSelector,
+  neutronVaultQueries,
   refreshDaoVotingPowerAtom,
   refreshFollowingDaosAtom,
   refreshWalletBalancesIdAtom,
@@ -18,12 +19,12 @@ import {
   StakingModal as StatelessStakingModal,
   useCachedLoadingWithError,
 } from '@dao-dao/stateless'
-import { BaseStakingModalProps } from '@dao-dao/types'
+import { BaseStakingModalProps, TokenInputOption } from '@dao-dao/types'
 import {
   CHAIN_GAS_MULTIPLIER,
   convertDenomToMicroDenomStringWithDecimals,
-  convertDenomToMicroDenomWithDecimals,
   convertMicroDenomToDenomWithDecimals,
+  makeCombineQueryResultsIntoLoadingDataWithError,
   processError,
   tokensEqual,
 } from '@dao-dao/utils'
@@ -33,7 +34,6 @@ import {
   NeutronVaultHooks,
   useAwaitNextBlock,
   useWallet,
-  useWalletInfo,
 } from '../../../../hooks'
 import { useVotingModuleAdapterOptions } from '../../../react/context'
 import { useVotingModule } from '../hooks'
@@ -52,8 +52,7 @@ const InnerStakingModal = ({
   initialMode = StakingMode.Stake,
 }: BaseStakingModalProps) => {
   const { t } = useTranslation()
-  const { address = '', isWalletConnected } = useWallet()
-  const { refreshBalances } = useWalletInfo()
+  const { address = '', isWalletConnected, refreshBalances } = useWallet()
   const { coreAddress, chainId } = useVotingModuleAdapterOptions()
 
   const { loadingVaults } = useVotingModule()
@@ -69,23 +68,24 @@ const InnerStakingModal = ({
             : []
         )
 
-  const loadingStakedTokens = useCachedLoadingWithError(
-    loadingVaults.loading || loadingVaults.errored || !address
-      ? undefined
-      : waitForAll(
-          realVaults.map(({ address: contractAddress }) =>
-            NeutronVaultSelectors.bondingStatusSelector({
-              contractAddress,
+  const loadingStakedTokens = useQueries({
+    queries:
+      loadingVaults.loading || loadingVaults.errored || !address
+        ? []
+        : realVaults.map(({ address: contractAddress }) =>
+            neutronVaultQueries.bondingStatus({
               chainId,
-              params: [
-                {
-                  address,
-                },
-              ],
+              contractAddress,
+              args: {
+                address,
+              },
             })
-          )
-        )
-  )
+          ),
+    combine: makeCombineQueryResultsIntoLoadingDataWithError({
+      // Show loading if empty array is passed.
+      loadIfNone: true,
+    }),
+  })
   const loadingUnstakedTokens = useCachedLoadingWithError(
     loadingVaults.loading || loadingVaults.errored || !address
       ? undefined
@@ -205,10 +205,10 @@ const InnerStakingModal = ({
 
         try {
           await doUnstake({
-            amount: convertDenomToMicroDenomWithDecimals(
+            amount: convertDenomToMicroDenomStringWithDecimals(
               amount,
               selectedVault.bondToken.decimals
-            ).toString(),
+            ),
           })
 
           // New balances will not appear until the next block.
@@ -300,7 +300,7 @@ const InnerStakingModal = ({
                       loading: false,
                       data: realVaults.map(({ bondToken }) => bondToken),
                     },
-              onSelectToken: (token) => {
+              onSelectToken: (token: TokenInputOption) => {
                 const index =
                   loadingVaults.loading || loadingVaults.errored
                     ? -1

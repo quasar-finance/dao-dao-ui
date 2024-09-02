@@ -2,16 +2,15 @@ import {
   Account,
   AccountType,
   BreadcrumbCrumb,
-  ContractVersion,
   DaoDropdownInfo,
   DaoParentInfo,
+  DaoSource,
   DaoWebSocketChannelInfo,
   PolytoneProxies,
 } from '@dao-dao/types'
-import { InstantiateMsg as DaoCoreV2InstantiateMsg } from '@dao-dao/types/contracts/DaoCore.v2'
+import { InstantiateMsg as DaoDaoCoreInstantiateMsg } from '@dao-dao/types/contracts/DaoDaoCore'
 
 import { getSupportedChainConfig } from './chain'
-import { getGovPath } from './url'
 
 export const getParentDaoBreadcrumbs = (
   getDaoPath: (coreAddress: string) => string,
@@ -21,9 +20,7 @@ export const getParentDaoBreadcrumbs = (
     ? [
         ...getParentDaoBreadcrumbs(getDaoPath, parentDao.parentDao),
         {
-          href: (parentDao.coreVersion === ContractVersion.Gov
-            ? getGovPath
-            : getDaoPath)(parentDao.coreAddress),
+          href: getDaoPath(parentDao.coreAddress),
           label: parentDao.name,
         },
       ]
@@ -60,7 +57,10 @@ export const polytoneNoteProxyMapToChainIdMap = (
 export const getFundsFromDaoInstantiateMsg = ({
   voting_module_instantiate_info,
   proposal_modules_instantiate_info,
-}: DaoCoreV2InstantiateMsg) => [
+}: Pick<
+  DaoDaoCoreInstantiateMsg,
+  'voting_module_instantiate_info' | 'proposal_modules_instantiate_info'
+>) => [
   ...(voting_module_instantiate_info.funds || []),
   ...proposal_modules_instantiate_info.flatMap(({ funds }) => funds || []),
 ]
@@ -71,12 +71,13 @@ export const getAccount = ({
   chainId,
   types = [AccountType.Native, AccountType.Polytone],
 }: {
-  accounts: Account[]
-  chainId: string
-  types?: AccountType[]
+  accounts: readonly Account[]
+  chainId?: string
+  types?: readonly AccountType[]
 }): Account | undefined =>
   accounts.find(
-    (account) => types.includes(account.type) && account.chainId === chainId
+    (account) =>
+      types.includes(account.type) && (!chainId || account.chainId === chainId)
   )
 
 // Gets the account address on the specified chain or undefined if nonexistent.
@@ -88,15 +89,11 @@ export const getAccountAddress = (
 export const getAccountChainId = ({
   accounts,
   address,
-  types = [AccountType.Native, AccountType.Polytone],
 }: {
   accounts: Account[]
   address: string
-  types?: AccountType[]
 }): string | undefined =>
-  accounts.find(
-    (account) => types.includes(account.type) && account.address === address
-  )?.chainId
+  accounts.find((account) => account.address === address)?.chainId
 
 /**
  * Filter DAO items by prefix and remove the prefix from the key.
@@ -119,7 +116,7 @@ export const getFilteredDaoItemsByPrefix = (
  */
 export const keepSubDaosInDropdown = (
   daos: DaoDropdownInfo[],
-  keepDaos: string[]
+  keepDaos: DaoSource[]
 ): DaoDropdownInfo[] =>
   daos.map((dao) => ({
     ...dao,
@@ -127,8 +124,8 @@ export const keepSubDaosInDropdown = (
       ? // Recurse into SubDAOs of SubDAOs.
         keepSubDaosInDropdown(
           // Only keep followed SubDAOs.
-          dao.subDaos.filter(({ coreAddress }) =>
-            keepDaos.includes(coreAddress)
+          dao.subDaos.filter((subDao) =>
+            keepDaos.some((keep) => daoSourcesEqual(subDao, keep))
           ),
           keepDaos
         )
@@ -150,3 +147,34 @@ export const subDaoExistsInDropdown = (
         (subDaos && subDaoExistsInDropdown(subDaos, subDaoAddress))
     )
   )
+
+/**
+ * Serialize DaoSource into a string. Since DaoSource is a subset of many other
+ * DAO object types, this will work for all of them and extract the unique
+ * variables that identify a DAO.
+ */
+export const serializeDaoSource = ({
+  chainId,
+  coreAddress,
+}: DaoSource): string => `${chainId}:${coreAddress}`
+
+/**
+ * Deserialize DaoSource from a string.
+ */
+export const deserializeDaoSource = (serialized: string): DaoSource => {
+  const [chainId, coreAddress] = serialized.split(':')
+  if (!chainId || !coreAddress) {
+    throw new Error('Invalid FollowedDao')
+  }
+
+  return {
+    chainId,
+    coreAddress,
+  }
+}
+
+/**
+ * Returns whether or not two DaoSources are equal.
+ */
+export const daoSourcesEqual = (a: DaoSource, b: DaoSource): boolean =>
+  a.chainId === b.chainId && a.coreAddress === b.coreAddress

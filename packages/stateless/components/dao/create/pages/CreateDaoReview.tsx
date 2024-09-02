@@ -3,7 +3,11 @@ import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { CreateDaoContext, DaoInfoCard } from '@dao-dao/types'
-import { parseEncodedMessage, processError } from '@dao-dao/utils'
+import {
+  decodeJsonFromBase64,
+  objectMatchesStructure,
+  processError,
+} from '@dao-dao/utils'
 
 import { CosmosMessageDisplay } from '../../../CosmosMessageDisplay'
 import { Checkbox } from '../../../inputs/Checkbox'
@@ -39,30 +43,55 @@ export const CreateDaoReview = ({
       throw new Error(t('error.daoCreationIncomplete'))
     }
 
-    const msg = cloneDeep(instantiateMsg)
+    const msg: any = cloneDeep(instantiateMsg)
     // Convert encoded module instantiation messages back to readable JSON.
     if (decodeModuleMessages) {
-      msg.proposal_modules_instantiate_info.forEach((info) => {
-        const msg = parseEncodedMessage(info.msg)
+      msg.proposal_modules_instantiate_info.forEach((info: any) => {
+        const msg = decodeJsonFromBase64(info.msg)
 
         // Convert encoded pre_propose_info message back to readable JSON.
         if (
-          'pre_propose_info' in msg &&
-          'module_may_propose' in msg.pre_propose_info &&
-          'info' in msg.pre_propose_info.module_may_propose &&
-          'msg' in msg.pre_propose_info.module_may_propose.info
+          objectMatchesStructure(msg, {
+            pre_propose_info: {
+              module_may_propose: {
+                info: {
+                  msg: {},
+                },
+              },
+            },
+          })
         ) {
           msg.pre_propose_info.module_may_propose.info.msg =
-            parseEncodedMessage(
+            decodeJsonFromBase64(
               msg.pre_propose_info.module_may_propose.info.msg
             )
         }
 
         info.msg = msg
       })
-      msg.voting_module_instantiate_info.msg = parseEncodedMessage(
+
+      msg.voting_module_instantiate_info.msg = decodeJsonFromBase64(
         msg.voting_module_instantiate_info.msg
       )
+      // Convert encoded token_info.factory message back to readable JSON.
+      if (
+        objectMatchesStructure(msg.voting_module_instantiate_info.msg, {
+          token_info: {
+            factory: {},
+          },
+        })
+      ) {
+        msg.voting_module_instantiate_info.msg.token_info.factory =
+          decodeJsonFromBase64(
+            msg.voting_module_instantiate_info.msg.token_info.factory
+          )
+
+        msg.voting_module_instantiate_info.msg.token_info.factory.execute.msg =
+          decodeJsonFromBase64(
+            msg.voting_module_instantiate_info.msg.token_info.factory.execute
+              .msg
+          )
+      }
     }
     // Pretty print output.
     previewJson = JSON.stringify(msg, undefined, 2)

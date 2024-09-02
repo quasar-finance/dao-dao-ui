@@ -3,13 +3,9 @@ import clsx from 'clsx'
 import { ComponentType, ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { ContractVersion, LinkWrapperProps } from '@dao-dao/types'
+import { LinkWrapperProps } from '@dao-dao/types'
 import { DaoParentInfo } from '@dao-dao/types/dao'
-import {
-  getFallbackImage,
-  getGovPath,
-  toAccessibleImageUrl,
-} from '@dao-dao/utils'
+import { getFallbackImage, toAccessibleImageUrl } from '@dao-dao/utils'
 
 import { useDaoNavHelpers } from '../../hooks'
 import { Tooltip } from '../tooltip'
@@ -104,15 +100,13 @@ export const DaoImage = ({
           <LinkWrapper
             className="block h-full w-full"
             containerClassName={clsx(
-              'absolute -top-2 -left-2 rounded-full bg-cover bg-center shadow-dp4',
+              'absolute -top-2 -left-2 rounded-full bg-cover bg-center shadow-dp4 animate-fade-in',
               {
                 'h-8 w-8': size === 'sm',
                 'h-10 w-10': size === 'lg',
               }
             )}
-            href={(parentDao.coreVersion === ContractVersion.Gov
-              ? getGovPath
-              : getDaoPath)(parentDao.coreAddress)}
+            href={getDaoPath(parentDao.coreAddress)}
             onClick={(e) => e.stopPropagation()}
             style={{
               backgroundImage: `url(${

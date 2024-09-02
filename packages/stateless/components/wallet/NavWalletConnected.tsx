@@ -1,34 +1,47 @@
-import { fromBech32 } from '@cosmjs/encoding'
 import {
-  Check,
   Logout,
   NotificationsOutlined,
-  Wallet as WalletIcon,
+  Tag,
+  WarningAmberRounded,
 } from '@mui/icons-material'
 import clsx from 'clsx'
-import { useEffect, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
+import toast from 'react-hot-toast'
 import { useTranslation } from 'react-i18next'
 
-import { DaoPageMode, NavWalletConnectedProps } from '@dao-dao/types'
+import {
+  DaoPageMode,
+  NavWalletConnectedProps,
+  PopupTriggerCustomComponent,
+} from '@dao-dao/types'
+import {
+  abbreviateAddress,
+  getDisplayNameForChainId,
+  getImageUrlForChainId,
+} from '@dao-dao/utils'
 
-import { CopyableAddress } from '../CopyableAddress'
 import { IconButton } from '../icon_buttons'
 import { useAppContextIfAvailable } from '../layout/AppContext'
 import { Notifications } from '../Notifications'
-import { Popup } from '../popup'
-import { ProfileImage, ProfileNameDisplayAndEditor } from '../profile'
+import {
+  ButtonPopup,
+  FilterableItem,
+  FilterableItemPopup,
+  Popup,
+} from '../popup'
+import { ProfileImage } from '../profile'
 import { Tooltip } from '../tooltip'
 import { WalletLogo } from './WalletLogo'
 
 export const NavWalletConnected = ({
   wallet,
-  walletAddress,
-  walletProfileData,
-  updateProfileName,
-  onEditProfileImage,
+  profile,
+  mergeProfileType,
+  onMergeProfiles,
   disconnect,
   className,
   mode,
+  ButtonLink,
   ...notificationsProps
 }: NavWalletConnectedProps) => {
   const { t } = useTranslation()
@@ -37,18 +50,68 @@ export const NavWalletConnected = ({
   // be in it.
   const { mode: appMode, inbox } = useAppContextIfAvailable() ?? {}
 
-  const [copied, setCopied] = useState(false)
-  // Debounce copy unset after 2 seconds.
-  useEffect(() => {
-    const timeout = setTimeout(() => setCopied(false), 2000)
-    return () => clearTimeout(timeout)
-  }, [copied])
+  const [addressPopupVisible, setAddressPopupVisible] = useState(false)
 
-  // Try to get wallet prefix length so we shorten the address well.
-  let prefixLength = 5
-  try {
-    prefixLength = fromBech32(walletAddress).prefix.length
-  } catch {}
+  const ProfileImagePopup: PopupTriggerCustomComponent = useCallback(
+    ({ onClick }) => (
+      <div
+        className={clsx(
+          'relative flex shrink-0 items-center justify-center',
+          mode !== 'dock' &&
+            'cursor-pointer opacity-100 transition-opacity hover:opacity-70 active:opacity-60'
+        )}
+        onClick={mode === 'dock' ? undefined : onClick}
+      >
+        <ProfileImage
+          imageUrl={profile.loading ? undefined : profile.data.imageUrl}
+          loading={profile.loading}
+          size={mode === 'dock' ? 'xs' : 'md'}
+        />
+
+        <Tooltip
+          title={
+            wallet.name.startsWith('web3auth_')
+              ? t('info.signedInAs', {
+                  name: wallet?.prettyName,
+                })
+              : t('info.connectedTo', {
+                  name: wallet?.prettyName,
+                })
+          }
+        >
+          <WalletLogo
+            className="!absolute -right-1 -bottom-1"
+            logo={wallet.logo}
+            size={mode === 'dock' ? 'xs' : 'sm'}
+          />
+        </Tooltip>
+      </div>
+    ),
+    [mode, t, wallet, profile]
+  )
+
+  const profileChainAddresses = useMemo(
+    (): (FilterableItem & { chainId: string; address: string })[] =>
+      profile.loading
+        ? []
+        : Object.entries(profile.data.chains)
+            .map(([chainId, { address }]) => ({
+              key: chainId,
+              label: getDisplayNameForChainId(chainId),
+              iconUrl: getImageUrlForChainId(chainId),
+              rightNode: (
+                <p className="caption-text self-end md:self-center">
+                  {abbreviateAddress(address, 6)}
+                </p>
+              ),
+              iconClassName: '!h-8 !w-8',
+              contentContainerClassName: '!gap-4',
+              chainId,
+              address,
+            }))
+            .sort((a, b) => a.label.localeCompare(b.label)),
+    [profile]
+  )
 
   return (
     <div
@@ -57,117 +120,124 @@ export const NavWalletConnected = ({
         className
       )}
     >
-      {/* Icon overflows a bit on the bottom, so add extra room with pb-1. */}
-      <div className="flex min-w-0 grow flex-row items-stretch gap-3 pb-1">
-        {/* Image */}
-        <div className="relative flex shrink-0 items-center justify-center">
-          <ProfileImage
-            imageUrl={walletProfileData.profile.imageUrl}
-            loading={walletProfileData.loading}
-            onEdit={mode !== 'dock' ? onEditProfileImage : undefined}
-            size={mode === 'dock' ? 'xs' : 'sm'}
-          />
+      {/* Notification popup */}
+      {mode !== 'dock' &&
+        appMode === DaoPageMode.Dapp &&
+        inbox &&
+        notificationsProps.inbox && (
+          <Popup
+            popupClassName="min-w-72 max-w-lg max-h-[48rem]"
+            position={mode === 'sidebar' ? 'wide' : 'left'}
+            trigger={{
+              type: 'icon_button',
+              tooltip:
+                !inbox.loading && inbox.items.length > 0
+                  ? t('title.notificationsWithCount', {
+                      count: inbox.items.length,
+                    })
+                  : t('title.notifications'),
+              props: {
+                Icon: NotificationsOutlined,
+                className: 'text-icon-secondary relative',
+                variant: 'ghost',
+                size: 'sm',
+                // Show badge when notifications exist.
+                children: !inbox.loading && inbox.items.length > 0 && (
+                  <div className="animate-fade-in bg-icon-interactive-active absolute top-[0.2rem] right-[0.2rem] h-1 w-1 rounded-full"></div>
+                ),
+              },
+            }}
+          >
+            <div className="border-border-base flex flex-row items-center justify-between border-b p-4">
+              <p className="header-text">{t('title.notifications')}</p>
 
+              <div className="flex flex-row items-center gap-1 md:gap-2">
+                {notificationsProps.inbox.buttons.refresh}
+                {notificationsProps.inbox.buttons.clear}
+                {notificationsProps.inbox.buttons.settings}
+              </div>
+            </div>
+
+            <Notifications
+              {...notificationsProps}
+              className="no-scrollbar overflow-y-auto"
+              compact
+              inbox={notificationsProps.inbox}
+            />
+          </Popup>
+        )}
+
+      {mode !== 'dock' &&
+        !profile.loading &&
+        profile.data.nonce > -1 &&
+        mergeProfileType && (
           <Tooltip
             title={
-              wallet.name.startsWith('web3auth_')
-                ? t('info.signedInAs', {
-                    name: wallet?.prettyName,
-                  })
-                : t('info.connectedTo', {
-                    name: wallet?.prettyName,
-                  })
+              mergeProfileType === 'add'
+                ? t('info.addWalletToProfile')
+                : t('info.mergeProfilesTooltip')
             }
           >
-            <WalletLogo
-              className="!absolute -right-1 -bottom-1"
-              logo={wallet.logo}
-              size={mode === 'dock' ? 'xs' : 'sm'}
-            />
-          </Tooltip>
-        </div>
-
-        {mode !== 'dock' && (
-          <div className="flex min-w-0 grow flex-col items-stretch gap-0.5 pt-1">
-            <ProfileNameDisplayAndEditor
-              compact
-              editingClassName="flex flex-col items-stretch"
-              updateProfileName={updateProfileName}
-              walletProfileData={walletProfileData}
-            />
-
-            <CopyableAddress
-              Icon={copied ? Check : WalletIcon}
-              address={walletAddress}
-              className="!justify-start"
-              iconSizeClassName="!h-4 !w-4"
-              onCopy={() => setCopied(true)}
-              takeStartEnd={{ start: prefixLength + 5, end: 5 }}
-              textClassName="!legend-text"
-            />
-          </div>
-        )}
-      </div>
-
-      {/* Buttons */}
-      {mode !== 'dock' && (
-        <>
-          {/* Notification popup */}
-          {appMode === DaoPageMode.Dapp && inbox && notificationsProps.inbox && (
-            <Popup
-              popupClassName="min-w-72 max-w-lg max-h-[48rem]"
-              position={mode === 'sidebar' ? 'wide' : 'left'}
-              trigger={{
-                type: 'icon_button',
-                tooltip:
-                  !inbox.loading && inbox.items.length > 0
-                    ? t('title.notificationsWithCount', {
-                        count: inbox.items.length,
-                      })
-                    : t('title.notifications'),
-                props: {
-                  Icon: NotificationsOutlined,
-                  className: 'text-icon-secondary relative',
-                  variant: 'ghost',
-                  size: 'sm',
-                  // Show badge when notifications exist.
-                  children: !inbox.loading && inbox.items.length > 0 && (
-                    <div className="absolute top-[0.2rem] right-[0.2rem] h-1 w-1 animate-fade-in rounded-full bg-icon-interactive-active"></div>
-                  ),
-                },
-              }}
-            >
-              <div className="flex flex-row items-center justify-between border-b border-border-base p-4">
-                <p className="header-text">{t('title.notifications')}</p>
-
-                <div className="flex flex-row items-center gap-1 md:gap-2">
-                  {notificationsProps.inbox.buttons.refresh}
-                  {notificationsProps.inbox.buttons.clear}
-                  {notificationsProps.inbox.buttons.settings}
-                </div>
-              </div>
-
-              <Notifications
-                {...notificationsProps}
-                className="no-scrollbar overflow-y-auto"
-                compact
-                inbox={notificationsProps.inbox}
-              />
-            </Popup>
-          )}
-
-          {/* Log out */}
-          <Tooltip title={t('button.logOut')}>
             <IconButton
-              Icon={Logout}
-              className="text-icon-secondary"
-              onClick={disconnect}
+              Icon={WarningAmberRounded}
+              iconClassName="text-icon-interactive-warning"
+              onClick={onMergeProfiles}
               size="sm"
               variant="ghost"
             />
           </Tooltip>
-        </>
-      )}
+        )}
+
+      {/* Icon overflows a bit on the bottom, so add extra room with pb-1. */}
+      <div className="flex min-w-0 grow flex-row items-stretch gap-3 pb-1">
+        {/* Image */}
+        <ButtonPopup
+          ButtonLink={ButtonLink}
+          position="left"
+          sections={[
+            {
+              buttons: [
+                {
+                  label: t('button.copyAddress'),
+                  Icon: Tag,
+                  onClick: () => setAddressPopupVisible(true),
+                },
+                {
+                  label: t('button.logOut'),
+                  Icon: Logout,
+                  onClick: disconnect,
+                },
+              ],
+            },
+          ]}
+          topOffset={8}
+          trigger={{
+            type: 'custom',
+            Renderer: ProfileImagePopup,
+          }}
+        />
+      </div>
+
+      <FilterableItemPopup
+        filterableItemKeys={FILTERABLE_KEYS}
+        items={profileChainAddresses}
+        onSelect={({ chainId, address }) => {
+          navigator.clipboard.writeText(address)
+          toast.success(
+            t('info.copiedChainAddress', {
+              chain: getDisplayNameForChainId(chainId),
+            })
+          )
+        }}
+        searchPlaceholder={t('info.searchForChain')}
+        trigger={{
+          type: 'manual',
+          open: addressPopupVisible,
+          setOpen: setAddressPopupVisible,
+        }}
+      />
     </div>
   )
 }
+
+const FILTERABLE_KEYS = ['label', 'chainId', 'address']

@@ -22,6 +22,7 @@ export const Popup = ({
   onClose,
   openRef,
   setOpenRef,
+  topOffset = 0,
 }: PopupProps) => {
   const wrapperRef = useRef<HTMLDivElement | null>(null)
 
@@ -122,7 +123,7 @@ export const Popup = ({
   // Track button to position the dropdown.
   const { onDropdownRef, onTrackRef } = useTrackDropdown({
     // Offset for outline of Trigger.
-    top: (rect) => rect.bottom + 4,
+    top: (rect) => rect.bottom + 4 + topOffset,
     left:
       position === 'right'
         ? (rect) => rect.left - 2
@@ -195,21 +196,27 @@ export const TriggerRenderer = ({ trigger, options }: TriggerRendererProps) => (
     {trigger.type === 'button' ? (
       <Tooltip title={trigger.tooltip}>
         <Button
-          {...(typeof trigger.props === 'function'
-            ? trigger.props(options)
-            : trigger.props)}
-          onClick={options.onClick}
-          pressed={options.open}
+          {...{
+            // Let props override these if desired.
+            onClick: options.onClick,
+            pressed: options.open,
+            ...(typeof trigger.props === 'function'
+              ? trigger.props(options)
+              : trigger.props),
+          }}
         />
       </Tooltip>
     ) : trigger.type === 'icon_button' ? (
       <Tooltip title={trigger.tooltip}>
         <IconButton
-          {...(typeof trigger.props === 'function'
-            ? trigger.props(options)
-            : trigger.props)}
-          focused={options.open}
-          onClick={options.onClick}
+          {...{
+            // Let props override these if desired.
+            onClick: options.onClick,
+            focused: options.open,
+            ...(typeof trigger.props === 'function'
+              ? trigger.props(options)
+              : trigger.props),
+          }}
         />
       </Tooltip>
     ) : trigger.type === 'custom' ? (

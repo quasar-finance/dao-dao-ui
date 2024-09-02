@@ -1,3 +1,4 @@
+import { parsePacketsFromTendermintEvents } from '@confio/relayer/build/lib/utils'
 import { CosmWasmClient } from '@cosmjs/cosmwasm-stargate'
 import { fromBase64, toHex } from '@cosmjs/encoding'
 import { Coin, IndexedTx, StargateClient } from '@cosmjs/stargate'
@@ -16,67 +17,68 @@ import {
   AllGovParams,
   AmountWithTimestamp,
   ChainId,
-  Delegation,
   GenericTokenBalance,
   GenericTokenBalanceWithOwner,
   GovProposalVersion,
   GovProposalWithDecodedContent,
-  NativeDelegationInfo,
   ProposalV1,
   ProposalV1Beta1,
   TokenType,
-  UnbondingDelegation,
   Validator,
+  ValidatorSlash,
   WithChainId,
 } from '@dao-dao/types'
-import {
-  addressIsModule,
-  cosmWasmClientRouter,
-  cosmosSdkVersionIs46OrHigher,
-  cosmosSdkVersionIs47OrHigher,
-  cosmosValidatorToValidator,
-  decodeGovProposal,
-  getAllRpcResponse,
-  getNativeTokenForChainId,
-  getRpcForChainId,
-  retry,
-  stargateClientRouter,
-} from '@dao-dao/utils'
-import {
-  cosmos,
-  cosmwasm,
-  ibc,
-  juno,
-  neutron,
-  noble,
-  osmosis,
-} from '@dao-dao/utils/protobuf'
-import { ModuleAccount } from '@dao-dao/utils/protobuf/codegen/cosmos/auth/v1beta1/auth'
-import { Metadata } from '@dao-dao/utils/protobuf/codegen/cosmos/bank/v1beta1/bank'
-import { DecCoin } from '@dao-dao/utils/protobuf/codegen/cosmos/base/v1beta1/coin'
+import { ModuleAccount } from '@dao-dao/types/protobuf/codegen/cosmos/auth/v1beta1/auth'
+import { Metadata } from '@dao-dao/types/protobuf/codegen/cosmos/bank/v1beta1/bank'
+import { DecCoin } from '@dao-dao/types/protobuf/codegen/cosmos/base/v1beta1/coin'
 import {
   ProposalStatus,
   TallyResult,
   Vote,
   WeightedVoteOption,
-} from '@dao-dao/utils/protobuf/codegen/cosmos/gov/v1beta1/gov'
+} from '@dao-dao/types/protobuf/codegen/cosmos/gov/v1beta1/gov'
 import {
   Pool,
   Validator as RpcValidator,
-} from '@dao-dao/utils/protobuf/codegen/cosmos/staking/v1beta1/staking'
-import { Fee as NeutronFee } from '@dao-dao/utils/protobuf/codegen/neutron/feerefunder/fee'
-import { Params as NobleTariffParams } from '@dao-dao/utils/protobuf/codegen/tariff/params'
+} from '@dao-dao/types/protobuf/codegen/cosmos/staking/v1beta1/staking'
+import { Packet } from '@dao-dao/types/protobuf/codegen/ibc/core/channel/v1/channel'
+import { Fee as NeutronFee } from '@dao-dao/types/protobuf/codegen/neutron/feerefunder/fee'
+import { Params as NobleTariffParams } from '@dao-dao/types/protobuf/codegen/tariff/params'
+import {
+  MAINNET,
+  SecretCosmWasmClient,
+  bitsongProtoRpcClientRouter,
+  cosmosProtoRpcClientRouter,
+  cosmosSdkVersionIs46OrHigher,
+  cosmosSdkVersionIs47OrHigher,
+  cosmosValidatorToValidator,
+  cosmwasmProtoRpcClientRouter,
+  decodeGovProposal,
+  getAllRpcResponse,
+  getCosmWasmClientForChainId,
+  getNativeTokenForChainId,
+  ibcProtoRpcClientRouter,
+  junoProtoRpcClientRouter,
+  kujiraProtoRpcClientRouter,
+  neutronProtoRpcClientRouter,
+  nobleProtoRpcClientRouter,
+  osmosisProtoRpcClientRouter,
+  secretCosmWasmClientRouter,
+  stargateClientRouter,
+} from '@dao-dao/utils'
 
+import { SearchGovProposalsOptions } from '../../indexer'
 import {
   refreshBlockHeightAtom,
   refreshGovProposalsAtom,
-  refreshNativeTokenStakingInfoAtom,
-  refreshUnreceivedIbcDataAtom,
+  refreshIbcDataAtom,
+  refreshOpenProposalsAtom,
   refreshWalletBalancesIdAtom,
 } from '../atoms/refresh'
 import {
   queryGenericIndexerSelector,
   queryValidatorIndexerSelector,
+  searchGovProposalsSelector,
 } from './indexer'
 import { genericTokenSelector } from './token'
 import { walletTokenDaoStakedDenomsSelector } from './wallet'
@@ -86,14 +88,7 @@ export const stargateClientForChainSelector = selectorFamily<
   string
 >({
   key: 'stargateClientForChain',
-  get: (chainId) => async () =>
-    retry(
-      10,
-      async (attempt) =>
-        await stargateClientRouter.connect(
-          getRpcForChainId(chainId, attempt - 1)
-        )
-    ),
+  get: (chainId) => async () => await stargateClientRouter.connect(chainId),
   dangerouslyAllowMutability: true,
 })
 
@@ -102,103 +97,60 @@ export const cosmWasmClientForChainSelector = selectorFamily<
   string
 >({
   key: 'cosmWasmClientForChain',
+  get: (chainId) => async () => await getCosmWasmClientForChainId(chainId),
+  dangerouslyAllowMutability: true,
+})
+
+export const secretCosmWasmClientForChainSelector = selectorFamily<
+  SecretCosmWasmClient,
+  string
+>({
+  key: 'secretCosmWasmClientForChain',
   get: (chainId) => async () =>
-    retry(
-      10,
-      async (attempt) =>
-        await cosmWasmClientRouter.connect(
-          getRpcForChainId(chainId, attempt - 1)
-        )
-    ),
+    await secretCosmWasmClientRouter.connect(chainId),
   dangerouslyAllowMutability: true,
 })
 
 export const cosmosRpcClientForChainSelector = selectorFamily({
   key: 'cosmosRpcClientForChain',
   get: (chainId: string) => async () =>
-    retry(
-      10,
-      async (attempt) =>
-        (
-          await cosmos.ClientFactory.createRPCQueryClient({
-            rpcEndpoint: getRpcForChainId(chainId, attempt - 1),
-          })
-        ).cosmos
-    ),
+    await cosmosProtoRpcClientRouter.connect(chainId),
   dangerouslyAllowMutability: true,
 })
 
 export const ibcRpcClientForChainSelector = selectorFamily({
   key: 'ibcRpcClientForChain',
   get: (chainId: string) => async () =>
-    retry(
-      10,
-      async (attempt) =>
-        (
-          await ibc.ClientFactory.createRPCQueryClient({
-            rpcEndpoint: getRpcForChainId(chainId, attempt - 1),
-          })
-        ).ibc
-    ),
+    await ibcProtoRpcClientRouter.connect(chainId),
   dangerouslyAllowMutability: true,
 })
 
 export const cosmwasmRpcClientForChainSelector = selectorFamily({
   key: 'cosmwasmRpcClientForChain',
   get: (chainId: string) => async () =>
-    retry(
-      10,
-      async (attempt) =>
-        (
-          await cosmwasm.ClientFactory.createRPCQueryClient({
-            rpcEndpoint: getRpcForChainId(chainId, attempt - 1),
-          })
-        ).cosmwasm
-    ),
+    await cosmwasmProtoRpcClientRouter.connect(chainId),
   dangerouslyAllowMutability: true,
 })
 
 export const osmosisRpcClientForChainSelector = selectorFamily({
   key: 'osmosisRpcClientForChain',
   get: (chainId: string) => async () =>
-    retry(
-      10,
-      async (attempt) =>
-        (
-          await osmosis.ClientFactory.createRPCQueryClient({
-            rpcEndpoint: getRpcForChainId(chainId, attempt - 1),
-          })
-        ).osmosis
-    ),
+    await osmosisProtoRpcClientRouter.connect(chainId),
   dangerouslyAllowMutability: true,
 })
 
 export const nobleRpcClientSelector = selector({
   key: 'nobleRpcClient',
   get: async () =>
-    retry(
-      10,
-      async (attempt) =>
-        (
-          await noble.ClientFactory.createRPCQueryClient({
-            rpcEndpoint: getRpcForChainId(ChainId.NobleMainnet, attempt - 1),
-          })
-        ).noble
-    ),
+    await nobleProtoRpcClientRouter.connect(ChainId.NobleMainnet),
   dangerouslyAllowMutability: true,
 })
 
 export const neutronRpcClientSelector = selector({
   key: 'neutronRpcClient',
   get: async () =>
-    retry(
-      10,
-      async (attempt) =>
-        (
-          await neutron.ClientFactory.createRPCQueryClient({
-            rpcEndpoint: getRpcForChainId(ChainId.NeutronMainnet, attempt - 1),
-          })
-        ).neutron
+    await neutronProtoRpcClientRouter.connect(
+      MAINNET ? ChainId.NeutronMainnet : ChainId.NeutronTestnet
     ),
   dangerouslyAllowMutability: true,
 })
@@ -206,14 +158,8 @@ export const neutronRpcClientSelector = selector({
 export const junoRpcClientSelector = selector({
   key: 'junoRpcClient',
   get: async () =>
-    retry(
-      10,
-      async (attempt) =>
-        (
-          await juno.ClientFactory.createRPCQueryClient({
-            rpcEndpoint: getRpcForChainId(ChainId.JunoMainnet, attempt - 1),
-          })
-        ).juno
+    await junoProtoRpcClientRouter.connect(
+      MAINNET ? ChainId.JunoMainnet : ChainId.JunoTestnet
     ),
   dangerouslyAllowMutability: true,
 })
@@ -395,39 +341,6 @@ export const nativeBalancesSelector = selectorFamily<
     },
 })
 
-// Refreshes when wallet balances refresh.
-export const nativeBalancesFetchedAtSelector = selectorFamily<
-  Date,
-  WithChainId<{ address: string }>
->({
-  key: 'nativeBalancesFetchedAt',
-  get:
-    ({ address }) =>
-    ({ get }) => {
-      get(refreshWalletBalancesIdAtom(address))
-      return new Date()
-    },
-})
-
-export const nativeBalanceSelector = selectorFamily<
-  Coin,
-  WithChainId<{ address: string }>
->({
-  key: 'nativeBalance',
-  get:
-    ({ address, chainId }) =>
-    async ({ get }) => {
-      const client = get(stargateClientForChainSelector(chainId))
-
-      get(refreshWalletBalancesIdAtom(address))
-
-      return await client.getBalance(
-        address,
-        getNativeTokenForChainId(chainId).denomOrAddress
-      )
-    },
-})
-
 export const tokenFactoryDenomCreationFeeSelector = selectorFamily<
   Coin[] | undefined,
   string
@@ -436,6 +349,24 @@ export const tokenFactoryDenomCreationFeeSelector = selectorFamily<
   get:
     (chainId) =>
     async ({ get }) => {
+      if (
+        chainId === ChainId.KujiraTestnet ||
+        chainId === ChainId.KujiraMainnet
+      ) {
+        const kujiraClient = await kujiraProtoRpcClientRouter.connect(chainId)
+        const { params } = await kujiraClient.denom.params()
+        return params?.creationFee
+      }
+
+      if (
+        chainId === ChainId.BitsongMainnet ||
+        chainId === ChainId.BitsongTestnet
+      ) {
+        const bitsongClient = await bitsongProtoRpcClientRouter.connect(chainId)
+        const { params } = await bitsongClient.fantoken.v1beta1.params()
+        return params?.issueFee && [params.issueFee]
+      }
+
       const osmosisClient = get(osmosisRpcClientForChainSelector(chainId))
       try {
         return (await osmosisClient.tokenfactory.v1beta1.params()).params
@@ -493,7 +424,9 @@ export const neutronIbcTransferFeeSelector = selector<
             uniqueDenoms.map((denom) =>
               genericTokenSelector({
                 type: TokenType.Native,
-                chainId: ChainId.NeutronMainnet,
+                chainId: MAINNET
+                  ? ChainId.NeutronMainnet
+                  : ChainId.NeutronTestnet,
                 denomOrAddress: denom,
               })
             )
@@ -555,7 +488,7 @@ export const nativeDenomBalanceWithTimestampSelector = selectorFamily<
 
       return {
         amount,
-        timestamp: new Date(),
+        timestamp: Date.now(),
       }
     },
 })
@@ -570,7 +503,10 @@ export const nativeDelegatedBalanceSelector = selectorFamily<
     ({ address, chainId }) =>
     async ({ get }) => {
       // Neutron does not have staking.
-      if (chainId === ChainId.NeutronMainnet) {
+      if (
+        chainId === ChainId.NeutronMainnet ||
+        chainId === ChainId.NeutronTestnet
+      ) {
         return {
           amount: '0',
           denom: getNativeTokenForChainId(chainId).denomOrAddress,
@@ -641,31 +577,6 @@ export const blocksPerYearSelector = selectorFamily<number, WithChainId<{}>>({
     },
 })
 
-// Queries the chain for the commission of a given validator address.
-export const validatorSelector = selectorFamily<
-  Validator,
-  WithChainId<{ address: string }>
->({
-  key: 'validator',
-  get:
-    ({ address: validatorAddr, chainId }) =>
-    async ({ get }) => {
-      get(refreshWalletBalancesIdAtom(''))
-      get(refreshWalletBalancesIdAtom(validatorAddr))
-
-      const client = get(cosmosRpcClientForChainSelector(chainId))
-
-      const { validator } = await client.staking.v1beta1.validator({
-        validatorAddr,
-      })
-      if (!validator) {
-        throw new Error('Validator not found')
-      }
-
-      return cosmosValidatorToValidator(validator)
-    },
-})
-
 export const nativeUnstakingDurationSecondsSelector = selectorFamily<
   number,
   WithChainId<{}>
@@ -675,7 +586,10 @@ export const nativeUnstakingDurationSecondsSelector = selectorFamily<
     ({ chainId }) =>
     async ({ get }) => {
       // Neutron does not have staking.
-      if (chainId === ChainId.NeutronMainnet) {
+      if (
+        chainId === ChainId.NeutronMainnet ||
+        chainId === ChainId.NeutronTestnet
+      ) {
         return 0
       }
 
@@ -697,6 +611,58 @@ export const nativeUnstakingDurationSecondsSelector = selectorFamily<
     },
 })
 
+/**
+ * Search gov proposals in the indexer and decode their content.
+ */
+export const searchedDecodedGovProposalsSelector = selectorFamily<
+  {
+    proposals: GovProposalWithDecodedContent[]
+    total: number
+  },
+  SearchGovProposalsOptions
+>({
+  key: 'searchedDecodedGovProposals',
+  get:
+    (options) =>
+    async ({ get }) => {
+      const supportsV1Gov = get(
+        chainSupportsV1GovModuleSelector({ chainId: options.chainId })
+      )
+
+      const { results, total } = get(searchGovProposalsSelector(options))
+
+      const proposals = (
+        await Promise.allSettled(
+          results.map(async ({ value: { id, data } }) =>
+            decodeGovProposal(
+              options.chainId,
+              supportsV1Gov
+                ? {
+                    version: GovProposalVersion.V1,
+                    id: BigInt(id),
+                    proposal: ProposalV1.decode(fromBase64(data)),
+                  }
+                : {
+                    version: GovProposalVersion.V1_BETA_1,
+                    id: BigInt(id),
+                    proposal: ProposalV1Beta1.decode(
+                      fromBase64(data),
+                      undefined,
+                      true
+                    ),
+                  }
+            )
+          )
+        )
+      ).flatMap((p) => (p.status === 'fulfilled' ? p.value : []))
+
+      return {
+        proposals,
+        total,
+      }
+    },
+})
+
 // Queries the chain for governance proposals, defaulting to those that are
 // currently open for voting.
 export const govProposalsSelector = selectorFamily<
@@ -712,123 +678,61 @@ export const govProposalsSelector = selectorFamily<
 >({
   key: 'govProposals',
   get:
-    ({
-      status = ProposalStatus.PROPOSAL_STATUS_UNSPECIFIED,
-      offset,
-      limit,
-      chainId,
-    }) =>
+    ({ chainId, status, offset, limit }) =>
     async ({ get }) => {
       get(refreshGovProposalsAtom(chainId))
+      if (
+        status === ProposalStatus.PROPOSAL_STATUS_DEPOSIT_PERIOD ||
+        status === ProposalStatus.PROPOSAL_STATUS_VOTING_PERIOD
+      ) {
+        get(refreshOpenProposalsAtom)
+      }
 
+      // Try to load from indexer first.
+      const indexerProposals = get(
+        waitForAllSettled([
+          searchedDecodedGovProposalsSelector({
+            chainId,
+            status,
+            offset,
+            limit,
+          }),
+        ])
+      )[0].valueMaybe()
+
+      if (indexerProposals?.proposals.length) {
+        return indexerProposals
+      }
+
+      // Fallback to querying chain if indexer failed.
       const supportsV1Gov = get(chainSupportsV1GovModuleSelector({ chainId }))
 
       let v1Proposals: ProposalV1[] | undefined
       let v1Beta1Proposals: ProposalV1Beta1[] | undefined
       let total = 0
 
-      // Try to load from indexer first.
-      const indexerProposals: {
-        id: string
-        data: string
-      }[] =
-        get(
-          queryGenericIndexerSelector({
-            chainId,
-            formula: 'gov/reverseProposals',
-            args: {
-              limit,
-              offset,
-            },
-          })
-        )?.proposals ?? []
-
-      if (indexerProposals.length) {
-        if (supportsV1Gov) {
-          v1Proposals = indexerProposals.flatMap(
-            ({ data }): ProposalV1 | [] => {
-              try {
-                return ProposalV1.decode(fromBase64(data))
-              } catch {
-                return []
-              }
-            }
-          )
-        } else {
-          v1Beta1Proposals = indexerProposals.flatMap(
-            ({ data }): ProposalV1Beta1 | [] => {
-              try {
-                return ProposalV1Beta1.decode(fromBase64(data))
-              } catch {
-                return []
-              }
-            }
-          )
-        }
-
-        // Fallback to querying chain if indexer failed.
-      } else {
-        const client = get(cosmosRpcClientForChainSelector(chainId))
-        if (supportsV1Gov) {
-          try {
-            if (limit === undefined && offset === undefined) {
-              v1Proposals = await getAllRpcResponse(
+      const client = get(cosmosRpcClientForChainSelector(chainId))
+      if (supportsV1Gov) {
+        try {
+          if (limit === undefined && offset === undefined) {
+            v1Proposals =
+              (await getAllRpcResponse(
                 client.gov.v1.proposals,
                 {
-                  proposalStatus: status,
+                  proposalStatus:
+                    status || ProposalStatus.PROPOSAL_STATUS_UNSPECIFIED,
                   voter: '',
                   depositor: '',
                   pagination: undefined,
                 },
                 'proposals',
                 true
-              )
-              total = v1Proposals.length
-            } else {
-              const response = await client.gov.v1.proposals({
-                proposalStatus: status,
-                voter: '',
-                depositor: '',
-                pagination: {
-                  key: new Uint8Array(),
-                  offset: BigInt(offset || 0),
-                  limit: BigInt(limit || 0),
-                  countTotal: true,
-                  reverse: true,
-                },
-              })
-              v1Proposals = response.proposals
-              total = Number(response.pagination?.total || 0)
-            }
-          } catch (err) {
-            // Fallback to v1beta1 query if v1 not supported.
-            if (
-              !(err instanceof Error) ||
-              !err.message.includes('unknown query path')
-            ) {
-              // Rethrow other errors.
-              throw err
-            }
-          }
-        }
-
-        if (!v1Proposals) {
-          if (limit === undefined && offset === undefined) {
-            v1Beta1Proposals = await getAllRpcResponse(
-              client.gov.v1beta1.proposals,
-              {
-                proposalStatus: status,
-                voter: '',
-                depositor: '',
-                pagination: undefined,
-              },
-              'proposals',
-              true
-            )
-            total = v1Beta1Proposals.length
+              )) || []
+            total = v1Proposals.length
           } else {
-            const response = await client.gov.v1beta1.proposals({
-              proposalStatus: status,
+            const response = await client.gov.v1.proposals({
+              proposalStatus:
+                status || ProposalStatus.PROPOSAL_STATUS_UNSPECIFIED,
               voter: '',
               depositor: '',
               pagination: {
@@ -839,22 +743,70 @@ export const govProposalsSelector = selectorFamily<
                 reverse: true,
               },
             })
-            v1Beta1Proposals = response.proposals
+            v1Proposals = response.proposals
             total = Number(response.pagination?.total || 0)
           }
+        } catch (err) {
+          // Fallback to v1beta1 query if v1 not supported.
+          if (
+            !(err instanceof Error) ||
+            !err.message.includes('unknown query path')
+          ) {
+            // Rethrow other errors.
+            throw err
+          }
+        }
+      }
+
+      if (!v1Proposals) {
+        if (limit === undefined && offset === undefined) {
+          v1Beta1Proposals =
+            (await getAllRpcResponse(
+              client.gov.v1beta1.proposals,
+              {
+                proposalStatus:
+                  status || ProposalStatus.PROPOSAL_STATUS_UNSPECIFIED,
+                voter: '',
+                depositor: '',
+                pagination: undefined,
+              },
+              'proposals',
+              true,
+              true
+            )) || []
+          total = v1Beta1Proposals.length
+        } else {
+          const response = await client.gov.v1beta1.proposals(
+            {
+              proposalStatus:
+                status || ProposalStatus.PROPOSAL_STATUS_UNSPECIFIED,
+              voter: '',
+              depositor: '',
+              pagination: {
+                key: new Uint8Array(),
+                offset: BigInt(offset || 0),
+                limit: BigInt(limit || 0),
+                countTotal: true,
+                reverse: true,
+              },
+            },
+            true
+          )
+          v1Beta1Proposals = response.proposals
+          total = Number(response.pagination?.total || 0)
         }
       }
 
       const proposals = await Promise.all([
         ...(v1Beta1Proposals || []).map((proposal) =>
-          decodeGovProposal({
+          decodeGovProposal(chainId, {
             version: GovProposalVersion.V1_BETA_1,
             id: proposal.proposalId,
             proposal,
           })
         ),
         ...(v1Proposals || []).map((proposal) =>
-          decodeGovProposal({
+          decodeGovProposal(chainId, {
             version: GovProposalVersion.V1,
             id: proposal.id,
             proposal,
@@ -878,7 +830,7 @@ export const govProposalSelector = selectorFamily<
   get:
     ({ proposalId, chainId }) =>
     async ({ get }) => {
-      get(refreshGovProposalsAtom(chainId))
+      const id = get(refreshGovProposalsAtom(chainId))
 
       const supportsV1Gov = get(chainSupportsV1GovModuleSelector({ chainId }))
 
@@ -889,77 +841,107 @@ export const govProposalSelector = selectorFamily<
             version: string
             data: string
           }
-        | undefined = get(
-        queryGenericIndexerSelector({
-          chainId,
-          formula: 'gov/proposal',
-          args: {
-            id: proposalId,
-          },
-        })
-      )
+        | undefined
+        | null = get(
+        waitForAllSettled([
+          queryGenericIndexerSelector({
+            chainId,
+            formula: 'gov/proposal',
+            args: {
+              id: proposalId,
+            },
+            id,
+          }),
+        ])
+      )[0].valueMaybe()
+
+      let govProposal: GovProposalWithDecodedContent | undefined
 
       if (indexerProposal) {
         if (supportsV1Gov) {
-          return await decodeGovProposal({
+          govProposal = await decodeGovProposal(chainId, {
             version: GovProposalVersion.V1,
             id: BigInt(proposalId),
             proposal: ProposalV1.decode(fromBase64(indexerProposal.data)),
           })
         } else {
-          return await decodeGovProposal({
+          govProposal = await decodeGovProposal(chainId, {
             version: GovProposalVersion.V1_BETA_1,
             id: BigInt(proposalId),
-            proposal: ProposalV1Beta1.decode(fromBase64(indexerProposal.data)),
+            proposal: ProposalV1Beta1.decode(
+              fromBase64(indexerProposal.data),
+              undefined,
+              true
+            ),
           })
         }
       }
 
       // Fallback to querying chain if indexer failed.
-      const client = get(cosmosRpcClientForChainSelector(chainId))
+      if (!govProposal) {
+        const client = get(cosmosRpcClientForChainSelector(chainId))
 
-      if (supportsV1Gov) {
-        try {
-          const proposal = (
-            await client.gov.v1.proposal({
-              proposalId: BigInt(proposalId),
+        if (supportsV1Gov) {
+          try {
+            const proposal = (
+              await client.gov.v1.proposal({
+                proposalId: BigInt(proposalId),
+              })
+            ).proposal
+            if (!proposal) {
+              throw new Error('Proposal not found')
+            }
+
+            govProposal = await decodeGovProposal(chainId, {
+              version: GovProposalVersion.V1,
+              id: BigInt(proposalId),
+              proposal,
             })
+          } catch (err) {
+            // Fallback to v1beta1 query if v1 not supported.
+            if (
+              !(err instanceof Error) ||
+              !err.message.includes('unknown query path')
+            ) {
+              // Rethrow other errors.
+              throw err
+            }
+          }
+        }
+
+        if (!govProposal) {
+          const proposal = (
+            await client.gov.v1beta1.proposal(
+              {
+                proposalId: BigInt(proposalId),
+              },
+              true
+            )
           ).proposal
           if (!proposal) {
             throw new Error('Proposal not found')
           }
 
-          return await decodeGovProposal({
-            version: GovProposalVersion.V1,
+          govProposal = await decodeGovProposal(chainId, {
+            version: GovProposalVersion.V1_BETA_1,
             id: BigInt(proposalId),
-            proposal: proposal,
+            proposal,
           })
-        } catch (err) {
-          // Fallback to v1beta1 query if v1 not supported.
-          if (
-            !(err instanceof Error) ||
-            !err.message.includes('unknown query path')
-          ) {
-            // Rethrow other errors.
-            throw err
-          }
         }
       }
 
-      const proposal = (
-        await client.gov.v1beta1.proposal({
-          proposalId: BigInt(proposalId),
-        })
-      ).proposal
-      if (!proposal) {
-        throw new Error('Proposal not found')
+      // If gov proposal is in deposit or voting period, refresh when open
+      // proposals refresh since it may have just opened (for voting) or closed.
+      if (
+        govProposal.proposal.status ===
+          ProposalStatus.PROPOSAL_STATUS_DEPOSIT_PERIOD ||
+        govProposal.proposal.status ===
+          ProposalStatus.PROPOSAL_STATUS_VOTING_PERIOD
+      ) {
+        get(refreshOpenProposalsAtom)
       }
 
-      return await decodeGovProposal({
-        version: GovProposalVersion.V1_BETA_1,
-        id: BigInt(proposalId),
-        proposal: proposal,
-      })
+      return govProposal
     },
 })
 
@@ -1222,24 +1204,6 @@ export const moduleNameForAddressSelector = selectorFamily<
     },
 })
 
-// Check whether or not the address is a module account.
-export const addressIsModuleSelector = selectorFamily<
-  boolean,
-  WithChainId<{
-    address: string
-    // If passed, check if it is this specific module.
-    moduleName?: string
-  }>
->({
-  key: 'addressIsModule',
-  get:
-    ({ chainId, address, moduleName }) =>
-    async ({ get }) => {
-      const client = get(cosmosRpcClientForChainSelector(chainId))
-      return await addressIsModule(client, address, moduleName)
-    },
-})
-
 // Get bonded and unbonded tokens. Bonded tokens represent all possible
 // governance voting power.
 export const chainStakingPoolSelector = selectorFamily<Pool, WithChainId<{}>>({
@@ -1358,122 +1322,6 @@ export const validatorsSelector = selectorFamily<Validator[], WithChainId<{}>>({
     },
 })
 
-export const nativeDelegationInfoSelector = selectorFamily<
-  NativeDelegationInfo,
-  WithChainId<{ address: string }>
->({
-  key: 'nativeDelegationInfo',
-  get:
-    ({ address: delegatorAddr, chainId }) =>
-    async ({ get }) => {
-      const client = get(cosmosRpcClientForChainSelector(chainId))
-
-      get(refreshNativeTokenStakingInfoAtom(delegatorAddr))
-
-      const delegations = await getAllRpcResponse(
-        client.staking.v1beta1.delegatorDelegations,
-        {
-          delegatorAddr,
-          pagination: undefined,
-        },
-        'delegationResponses'
-      )
-      const validators = await getAllRpcResponse(
-        client.staking.v1beta1.delegatorValidators,
-        {
-          delegatorAddr,
-          pagination: undefined,
-        },
-        'validators'
-      )
-      const rewards = (
-        await client.distribution.v1beta1.delegationTotalRewards({
-          delegatorAddress: delegatorAddr,
-        })
-      ).rewards
-      const unbondingDelegations = await getAllRpcResponse(
-        client.staking.v1beta1.delegatorUnbondingDelegations,
-        {
-          delegatorAddr,
-          pagination: undefined,
-        },
-        'unbondingResponses'
-      )
-
-      return {
-        delegations: delegations
-          .map(
-            ({
-              delegation: { validatorAddress: address } = {
-                validatorAddress: '',
-              },
-              balance: delegationBalance,
-            }): Delegation | undefined => {
-              if (
-                !delegationBalance ||
-                delegationBalance.denom !==
-                  getNativeTokenForChainId(chainId).denomOrAddress
-              ) {
-                return
-              }
-
-              const validator = validators.find(
-                ({ operatorAddress }) => operatorAddress === address
-              )
-              let pendingReward = rewards
-                .find(({ validatorAddress }) => validatorAddress === address)
-                ?.reward.find(
-                  ({ denom }) =>
-                    denom === getNativeTokenForChainId(chainId).denomOrAddress
-                )
-
-              if (!validator || !pendingReward) {
-                return
-              }
-
-              // Truncate.
-              pendingReward.amount = pendingReward.amount.split('.')[0]
-
-              return {
-                validator: cosmosValidatorToValidator(validator),
-                delegated: delegationBalance,
-                pendingReward,
-              }
-            }
-          )
-          .filter(Boolean) as Delegation[],
-
-        // Only returns native token unbondings, no need to check.
-        unbondingDelegations: unbondingDelegations.flatMap(
-          ({ validatorAddress, entries }) => {
-            const validator = get(
-              validatorSelector({
-                address: validatorAddress,
-                chainId,
-              })
-            )
-
-            return entries.map(
-              ({
-                creationHeight,
-                completionTime,
-                balance,
-              }): UnbondingDelegation => ({
-                validator,
-                balance: {
-                  amount: balance,
-                  denom: getNativeTokenForChainId(chainId).denomOrAddress,
-                },
-                startedAtHeight: Number(creationHeight),
-                finishesAt: completionTime || new Date(0),
-              })
-            )
-          }
-        ),
-      }
-    },
-})
-
 export const transactionSelector = selectorFamily<
   IndexedTx | undefined,
   WithChainId<{ txHash: string }>
@@ -1486,6 +1334,19 @@ export const transactionSelector = selectorFamily<
 
       const tx = await client.getTx(txHash)
       return tx ?? undefined
+    },
+})
+
+export const transactionPacketsSelector = selectorFamily<
+  Packet[] | undefined,
+  WithChainId<{ txHash: string }>
+>({
+  key: 'transactionPackets',
+  get:
+    (params) =>
+    async ({ get }) => {
+      const tx = get(transactionSelector(params))
+      return tx && parsePacketsFromTendermintEvents(tx.events)
     },
 })
 
@@ -1508,22 +1369,6 @@ export const walletHexPublicKeySelector = selectorFamily<
     },
 })
 
-export type ValidatorSlash = {
-  registeredBlockHeight: string
-  registeredBlockTimeUnixMs: string
-  infractionBlockHeight: string
-  // Slash fraction applied to validator's undelegating and redelegating tokens.
-  slashFactor: string
-  amountSlashed: string
-  // Slash fraction applied to validator's current delegations. It may be less
-  // than `slashFactor`.
-  effectiveFraction: string
-  // Amount of tokens slashed from delegations. This should be `amountSlashed`
-  // minus the amount slashed from the validator's undelegating and redelegating
-  // tokens.
-  stakedTokensBurned: string
-}
-
 // TODO(indexer): Use TX events indexer for this instead.
 export const validatorSlashesSelector = selectorFamily<
   ValidatorSlash[],
@@ -1538,6 +1383,7 @@ export const validatorSlashesSelector = selectorFamily<
           validatorOperatorAddress,
           chainId,
           formula: 'staking/slashes',
+          noFallback: true,
         })
       )) ?? [],
 })
@@ -1570,8 +1416,8 @@ export const denomMetadataSelector = selectorFamily<
 })
 
 export const ibcUnreceivedPacketsSelector = selectorFamily<
-  // Returns unreceived IBC packet sequences.
-  number[],
+  // Returns whether or not all of the IBC packet sequences have been received.
+  boolean,
   WithChainId<{
     portId: string
     channelId: string
@@ -1582,7 +1428,7 @@ export const ibcUnreceivedPacketsSelector = selectorFamily<
   get:
     ({ chainId, portId, channelId, packetCommitmentSequences }) =>
     async ({ get }) => {
-      get(refreshUnreceivedIbcDataAtom(chainId))
+      get(refreshIbcDataAtom(chainId))
       const ibcClient = get(ibcRpcClientForChainSelector(chainId))
       const { sequences } = await ibcClient.core.channel.v1.unreceivedPackets({
         portId,
@@ -1591,13 +1437,15 @@ export const ibcUnreceivedPacketsSelector = selectorFamily<
           BigInt(v)
         ),
       })
-      return sequences.map((s) => Number(s))
+      return sequences.some((s) =>
+        packetCommitmentSequences.includes(Number(s))
+      )
     },
 })
 
 export const ibcUnreceivedAcksSelector = selectorFamily<
-  // Returns unreceived IBC packet acknowledgement sequences.
-  number[],
+  // Returns whether or not all of the IBC packet acks have been received.
+  boolean,
   WithChainId<{
     portId: string
     channelId: string
@@ -1608,13 +1456,41 @@ export const ibcUnreceivedAcksSelector = selectorFamily<
   get:
     ({ chainId, portId, channelId, packetAckSequences }) =>
     async ({ get }) => {
-      get(refreshUnreceivedIbcDataAtom(chainId))
+      get(refreshIbcDataAtom(chainId))
       const ibcClient = get(ibcRpcClientForChainSelector(chainId))
       const { sequences } = await ibcClient.core.channel.v1.unreceivedAcks({
         portId,
         channelId,
         packetAckSequences: packetAckSequences.map((v) => BigInt(v)),
       })
-      return sequences.map((s) => Number(s))
+      return sequences.some((s) => packetAckSequences.includes(Number(s)))
+    },
+})
+
+export const ibcAckReceivedSelector = selectorFamily<
+  // Returns whether or not the IBC packet acknowledgement was received.
+  boolean,
+  WithChainId<{
+    portId: string
+    channelId: string
+    sequence: number
+  }>
+>({
+  key: 'ibcAckReceived',
+  get:
+    ({ chainId, portId, channelId, sequence }) =>
+    async ({ get }) => {
+      get(refreshIbcDataAtom(chainId))
+      const ibcClient = get(ibcRpcClientForChainSelector(chainId))
+      try {
+        await ibcClient.core.channel.v1.packetAcknowledgement({
+          portId,
+          channelId,
+          sequence: BigInt(sequence),
+        })
+        return true
+      } catch (err) {
+        return false
+      }
     },
 })

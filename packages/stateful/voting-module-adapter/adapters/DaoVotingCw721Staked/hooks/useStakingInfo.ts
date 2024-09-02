@@ -10,6 +10,8 @@ import {
   CommonNftSelectors,
   DaoVotingCw721StakedSelectors,
   blockHeightSelector,
+  contractVersionSelector,
+  nftCardInfoSelector,
   refreshClaimsIdAtom,
   refreshWalletBalancesIdAtom,
 } from '@dao-dao/state'
@@ -22,7 +24,6 @@ import { NftClaim } from '@dao-dao/types/contracts/DaoVotingCw721Staked'
 import { claimAvailable } from '@dao-dao/utils'
 
 import { useWallet } from '../../../../hooks/useWallet'
-import { nftCardInfoSelector } from '../../../../recoil/selectors/nft'
 import { useVotingModuleAdapterOptions } from '../../../react/context'
 import { UseStakingInfoOptions, UseStakingInfoResponse } from '../types'
 import { useGovernanceCollectionInfo } from './useGovernanceCollectionInfo'
@@ -31,7 +32,7 @@ export const useStakingInfo = ({
   fetchClaims = false,
   fetchTotalStakedValue = false,
   fetchWalletStakedValue = false,
-  fetchWalletUnstakedValue = false,
+  fetchWalletUnstakedNfts = false,
 }: UseStakingInfoOptions = {}): UseStakingInfoResponse => {
   const { chainId, votingModuleAddress } = useVotingModuleAdapterOptions()
   const { address: walletAddress } = useWallet({
@@ -41,14 +42,20 @@ export const useStakingInfo = ({
   const { collectionAddress: governanceTokenAddress } =
     useGovernanceCollectionInfo()
 
-  const unstakingDuration =
+  const [stakingContractVersion, { unstaking_duration: unstakingDuration }] =
     useRecoilValue(
-      DaoVotingCw721StakedSelectors.configSelector({
-        chainId,
-        contractAddress: votingModuleAddress,
-        params: [],
-      })
-    ).unstaking_duration ?? undefined
+      waitForAll([
+        contractVersionSelector({
+          chainId,
+          contractAddress: votingModuleAddress,
+        }),
+        DaoVotingCw721StakedSelectors.configSelector({
+          chainId,
+          contractAddress: votingModuleAddress,
+          params: [],
+        }),
+      ])
+    )
 
   const setRefreshTotalBalancesId = useSetRecoilState(
     refreshWalletBalancesIdAtom(undefined)
@@ -92,20 +99,16 @@ export const useStakingInfo = ({
       : constSelector(undefined),
     undefined
   )
-  const claims = loadingClaims.loading
-    ? []
-    : !loadingClaims.data
-    ? undefined
-    : loadingClaims.data.nft_claims
-
-  const nftClaims = claims
-    ? claims.map(
-        ({ token_id, release_at }): NftClaim => ({
-          release_at,
-          token_id,
-        })
-      )
-    : []
+  const claims =
+    loadingClaims.loading || !loadingClaims.data
+      ? []
+      : loadingClaims.data.nft_claims
+  const nftClaims = claims.map(
+    ({ token_id, release_at }): NftClaim => ({
+      release_at,
+      token_id,
+    })
+  )
 
   const claimsPending = blockHeight
     ? nftClaims?.filter((c) => !claimAvailable(c, blockHeight))
@@ -155,7 +158,7 @@ export const useStakingInfo = ({
   )
 
   const loadingWalletUnstakedNftsLoadable = useCachedLoadingWithError(
-    fetchWalletUnstakedValue && walletAddress && governanceTokenAddress
+    fetchWalletUnstakedNfts && walletAddress && governanceTokenAddress
       ? CommonNftSelectors.unpaginatedAllTokensForOwnerSelector({
           chainId,
           contractAddress: governanceTokenAddress,
@@ -181,8 +184,9 @@ export const useStakingInfo = ({
   )
 
   return {
+    stakingContractVersion,
     stakingContractAddress: votingModuleAddress,
-    unstakingDuration,
+    unstakingDuration: unstakingDuration ?? undefined,
     refreshTotals,
     /// Optional
     // Claims

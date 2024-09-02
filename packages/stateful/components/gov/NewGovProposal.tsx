@@ -1,5 +1,6 @@
 import { fromBase64 } from '@cosmjs/encoding'
 import { EncodeObject } from '@cosmjs/proto-signing'
+import { SigningStargateClient } from '@cosmjs/stargate'
 import {
   BookOutlined,
   Close,
@@ -9,11 +10,18 @@ import {
   Visibility,
   VisibilityOff,
 } from '@mui/icons-material'
+import { useQueryClient } from '@tanstack/react-query'
 import clsx from 'clsx'
 import Fuse from 'fuse.js'
 import cloneDeep from 'lodash.clonedeep'
 import { useRouter } from 'next/router'
-import { useCallback, useEffect, useState } from 'react'
+import {
+  MutableRefObject,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react'
 import {
   FormProvider,
   SubmitErrorHandler,
@@ -30,24 +38,28 @@ import {
 } from 'recoil'
 
 import {
-  govParamsSelector,
-  govProposalCreatedCardPropsAtom,
+  accountsSelector,
   govProposalSelector,
   latestProposalSaveAtom,
+  proposalCreatedCardPropsAtom,
   proposalDraftsAtom,
   refreshGovProposalsAtom,
 } from '@dao-dao/state/recoil'
+import { makeGetSignerOptions } from '@dao-dao/state/utils'
 import {
   Button,
   ErrorPage,
   FilterableItem,
   FilterableItemPopup,
   IconButton,
-  Loader,
   PageLoader,
   ProposalContentDisplay,
   Tooltip,
+  useCachedLoadingWithError,
   useConfiguredChainContext,
+  useDaoNavHelpers,
+  useHoldingKey,
+  useUpdatingRef,
 } from '@dao-dao/stateless'
 import {
   Action,
@@ -57,31 +69,37 @@ import {
   GovernanceProposalActionData,
   ProposalDraft,
 } from '@dao-dao/types'
+import { BinaryReader } from '@dao-dao/types/protobuf'
+import { MsgSubmitProposal as MsgSubmitProposalV1 } from '@dao-dao/types/protobuf/codegen/cosmos/gov/v1/tx'
+import { ProposalStatus } from '@dao-dao/types/protobuf/codegen/cosmos/gov/v1beta1/gov'
+import { MsgSubmitProposal as MsgSubmitProposalV1Beta1 } from '@dao-dao/types/protobuf/codegen/cosmos/gov/v1beta1/tx'
+import { Any } from '@dao-dao/types/protobuf/codegen/google/protobuf/any'
 import {
   CHAIN_GAS_MULTIPLIER,
+  SITE_URL,
   dateToWdhms,
+  decodeJsonFromBase64,
   formatDateTime,
   formatPercentOf100,
   formatTime,
-  getGovProposalPath,
+  getDisplayNameForChainId,
   getImageUrlForChainId,
+  getNullWalletForChain,
+  getRpcForChainId,
   govProposalActionDataToDecodedContent,
   isCosmWasmStargateMsg,
+  makeEmptyUnifiedProfile,
+  objectMatchesStructure,
   processError,
+  transformIpfsUrlToHttpsIfNecessary,
+  uploadJsonToIpfs,
 } from '@dao-dao/utils'
-import { BinaryReader } from '@dao-dao/utils/protobuf'
-import { MsgSubmitProposal as MsgSubmitProposalV1 } from '@dao-dao/utils/protobuf/codegen/cosmos/gov/v1/tx'
-import { ProposalStatus } from '@dao-dao/utils/protobuf/codegen/cosmos/gov/v1beta1/gov'
-import { MsgSubmitProposal as MsgSubmitProposalV1Beta1 } from '@dao-dao/utils/protobuf/codegen/cosmos/gov/v1beta1/tx'
-import { Any } from '@dao-dao/utils/protobuf/codegen/google/protobuf/any'
 
-import { WalletActionsProvider } from '../../actions'
+import { WalletActionsProvider, useActionOptions } from '../../actions'
 import { makeGovernanceProposalAction } from '../../actions/core/chain_governance/GovernanceProposal'
-import { useEntity } from '../../hooks'
+import { useEntity, useProfile } from '../../hooks'
 import { useWallet } from '../../hooks/useWallet'
-import { useWalletInfo } from '../../hooks/useWalletInfo'
 import { EntityDisplay } from '../EntityDisplay'
-import { SuspenseLoader } from '../SuspenseLoader'
 import { GovProposalActionDisplay } from './GovProposalActionDisplay'
 
 enum ProposeSubmitValue {
@@ -89,11 +107,26 @@ enum ProposeSubmitValue {
   Submit = 'Submit',
 }
 
-export const NewGovProposal = () => {
+export type NewGovProposalProps = Pick<
+  InnerNewGovProposalProps,
+  'clearRef' | 'copyDraftLinkRef'
+>
+
+export const NewGovProposal = (innerProps: NewGovProposalProps) => {
   const { t } = useTranslation()
+  const router = useRouter()
   const chainContext = useConfiguredChainContext()
 
-  const { walletAddress = '' } = useWalletInfo()
+  const { address: walletAddress = '' } = useWallet()
+  const { profile } = useProfile()
+  const accounts = useCachedLoadingWithError(
+    walletAddress
+      ? accountsSelector({
+          chainId: chainContext.chainId,
+          address: walletAddress,
+        })
+      : undefined
+  )
 
   const governanceProposalAction = makeGovernanceProposalAction({
     t,
@@ -105,36 +138,162 @@ export const NewGovProposal = () => {
     address: walletAddress,
     context: {
       type: ActionContextType.Wallet,
+      profile: profile.loading
+        ? makeEmptyUnifiedProfile(chainContext.chainId, walletAddress)
+        : profile.data,
+      accounts: accounts.loading || accounts.errored ? [] : accounts.data,
     },
   })!
   const defaults = governanceProposalAction.useDefaults()
 
-  return !defaults ? (
+  const localStorageKey = `gov_${chainContext.chainId}`
+  const latestProposalSave = useRecoilValue(
+    latestProposalSaveAtom(localStorageKey)
+  )
+
+  // Set once prefill has been assessed, indicating NewProposal can load now.
+  const [prefillChecked, setPrefillChecked] = useState(false)
+  // If set to an object, prefill form with data.
+  const [usePrefill, setUsePrefill] = useState<Record<string, any> | undefined>(
+    undefined
+  )
+  // Prefill form with data from parameter once ready.
+  useEffect(() => {
+    if (!router.isReady || prefillChecked) {
+      return
+    }
+
+    const loadFromPrefill = async () => {
+      let potentialPrefill = router.query.prefill
+
+      // If no potential prefill found, try to load from IPFS.
+      if (!potentialPrefill) {
+        if (router.query.pi && typeof router.query.pi === 'string') {
+          try {
+            // Parse as text (not JSON) since JSON will be parsed below.
+            potentialPrefill = await (
+              await fetch(
+                transformIpfsUrlToHttpsIfNecessary(`ipfs://${router.query.pi}`)
+              )
+            ).text()
+          } catch (error) {
+            console.error(error)
+            toast.error(t('error.failedToLoadIpfsProposalSave'))
+          }
+        }
+      }
+
+      if (typeof potentialPrefill !== 'string' || !potentialPrefill) {
+        setPrefillChecked(true)
+        return
+      }
+
+      // Try to parse as JSON.
+      let prefillData
+      try {
+        prefillData = JSON.parse(potentialPrefill)
+      } catch (error) {
+        console.error(error)
+      }
+
+      // Try to parse as base64.
+      if (!prefillData) {
+        try {
+          prefillData = decodeJsonFromBase64(potentialPrefill)
+        } catch (error) {
+          console.error(error)
+        }
+      }
+
+      // If prefillData looks valid, use it.
+      if (
+        objectMatchesStructure(prefillData, {
+          chainId: {},
+          title: {},
+          description: {},
+        })
+      ) {
+        setUsePrefill(prefillData)
+      }
+
+      setPrefillChecked(true)
+    }
+
+    loadFromPrefill()
+  }, [router.query.prefill, router.query.pi, router.isReady, prefillChecked, t])
+
+  return !defaults || (walletAddress && accounts.loading) || !prefillChecked ? (
     <PageLoader />
   ) : defaults instanceof Error ? (
     <ErrorPage error={defaults} />
   ) : (
     <InnerNewGovProposal
+      {...innerProps}
       action={governanceProposalAction}
-      defaults={defaults}
+      defaults={{
+        ...defaults,
+        ...cloneDeep(latestProposalSave),
+        ...usePrefill,
+      }}
+      localStorageKey={localStorageKey}
+      realDefaults={defaults}
     />
   )
 }
 
 type InnerNewGovProposalProps = {
+  /**
+   * The local storage key to use for saving the current form.
+   */
+  localStorageKey: string
+  /**
+   * The default values to use form the form on initial load, taking into
+   * account save state and prefill.
+   */
   defaults: GovernanceProposalActionData
+  /**
+   * Used to reset the form back to default.
+   */
+  realDefaults: GovernanceProposalActionData
+  /**
+   * The governance proposal creation action.
+   */
   action: Action<GovernanceProposalActionData>
+  /**
+   * A function ref that the parent uses to clear the form.
+   */
+  clearRef: MutableRefObject<() => void>
+  /**
+   * A function ref that copies a link to the current draft.
+   */
+  copyDraftLinkRef: MutableRefObject<() => Promise<void>>
 }
 
 const InnerNewGovProposal = ({
+  localStorageKey,
   defaults,
+  realDefaults,
   action,
+  clearRef,
+  copyDraftLinkRef,
 }: InnerNewGovProposalProps) => {
   const { t } = useTranslation()
   const router = useRouter()
   const chainContext = useConfiguredChainContext()
-  const { isWalletConnected, getSigningStargateClient, chain, chainWallet } =
-    useWallet()
+  const {
+    isWalletConnected,
+    getOfflineSignerAmino,
+    getOfflineSignerDirect,
+    chain,
+    chainWallet,
+  } = useWallet()
+  const { getDaoProposalPath } = useDaoNavHelpers()
+  const queryClient = useQueryClient()
+
+  const { context } = useActionOptions()
+  if (context.type !== ActionContextType.Gov) {
+    throw new Error(`Unsupported context: ${context}`)
+  }
 
   const [loading, setLoading] = useState(false)
 
@@ -142,14 +301,13 @@ const InnerNewGovProposal = ({
   const [showSubmitErrorNote, setShowSubmitErrorNote] = useState(false)
   const [submitError, setSubmitError] = useState('')
 
-  const { walletAddress = '' } = useWalletInfo()
-  const entity = useEntity(walletAddress)
+  const { address: walletAddress = '' } = useWallet()
+  const { entity } = useEntity(walletAddress)
 
-  const [govProposalCreatedCardProps, setGovProposalCreatedCardProps] =
-    useRecoilState(govProposalCreatedCardPropsAtom)
+  const [proposalCreatedCardProps, setProposalCreatedCardProps] =
+    useRecoilState(proposalCreatedCardPropsAtom)
 
-  const localStorageKey = `gov_${chainContext.chainId}`
-  const [latestProposalSave, setLatestProposalSave] = useRecoilState(
+  const setLatestProposalSave = useSetRecoilState(
     latestProposalSaveAtom(localStorageKey)
   )
 
@@ -157,10 +315,7 @@ const InnerNewGovProposal = ({
     action.useTransformToCosmos()
   const formMethods = useForm<GovernanceProposalActionData>({
     mode: 'onChange',
-    defaultValues: {
-      ...defaults,
-      ...cloneDeep(latestProposalSave),
-    },
+    defaultValues: defaults,
   })
   const {
     handleSubmit,
@@ -169,11 +324,7 @@ const InnerNewGovProposal = ({
     reset,
   } = formMethods
 
-  const govParams = useRecoilValue(
-    govParamsSelector({
-      chainId: chainContext.chainId,
-    })
-  )
+  const holdingAltForDirectSign = useHoldingKey({ key: 'alt' })
 
   const onSubmitError: SubmitErrorHandler<GovernanceProposalActionData> =
     useCallback(() => {
@@ -271,9 +422,16 @@ const InnerNewGovProposal = ({
 
           setLoading(true)
           try {
-            const { events } = await (
-              await getSigningStargateClient()
-            ).signAndBroadcast(
+            const signer = holdingAltForDirectSign
+              ? getOfflineSignerDirect()
+              : getOfflineSignerAmino()
+            const signingClient = await SigningStargateClient.connectWithSigner(
+              getRpcForChainId(chain.chain_id),
+              signer,
+              makeGetSignerOptions(queryClient)(chain)
+            )
+
+            const { events } = await signingClient.signAndBroadcast(
               walletAddress,
               [encodeObject],
               CHAIN_GAS_MULTIPLIER
@@ -310,7 +468,7 @@ const InnerNewGovProposal = ({
                 : proposal.proposal.votingEndTime
 
             // Show modal.
-            setGovProposalCreatedCardProps({
+            setProposalCreatedCardProps({
               id: proposal.id.toString(),
               title: proposal.title,
               description: proposal.description,
@@ -318,13 +476,13 @@ const InnerNewGovProposal = ({
                 {
                   Icon: BookOutlined,
                   label: `${t('title.threshold')}: ${formatPercentOf100(
-                    govParams.threshold * 100
+                    context.params.threshold * 100
                   )}`,
                 },
                 {
                   Icon: FlagOutlined,
                   label: `${t('title.quorum')}: ${formatPercentOf100(
-                    govParams.quorum * 100
+                    context.params.quorum * 100
                   )}`,
                 },
                 ...(endTime
@@ -337,9 +495,8 @@ const InnerNewGovProposal = ({
                   : []),
               ],
               dao: {
-                type: 'gov',
-                name: chainContext.chain.pretty_name,
-                coreAddressOrId: chainContext.config.name,
+                name: getDisplayNameForChainId(chainContext.chainId),
+                coreAddress: chainContext.config.name,
                 imageUrl: getImageUrlForChainId(chainContext.chainId),
               },
             })
@@ -352,7 +509,7 @@ const InnerNewGovProposal = ({
 
             // Navigate to proposal (underneath the creation modal).
             router.push(
-              getGovProposalPath(
+              getDaoProposalPath(
                 chainContext.config.name,
                 proposalId.toString()
               )
@@ -372,34 +529,74 @@ const InnerNewGovProposal = ({
         t,
         transformGovernanceProposalActionDataToCosmos,
         walletAddress,
-        getSigningStargateClient,
+        getOfflineSignerAmino,
+        getOfflineSignerDirect,
+        holdingAltForDirectSign,
         chainContext.chainId,
-        chainContext.chain.pretty_name,
         chainContext.config.name,
-        setGovProposalCreatedCardProps,
-        govParams.threshold,
-        govParams.quorum,
+        setProposalCreatedCardProps,
+        context.params.threshold,
+        context.params.quorum,
         refreshGovProposals,
         setLatestProposalSave,
         router,
+        queryClient,
       ]
     )
   const proposalData = watch()
 
-  // Save latest data to atom and thus localStorage every 10 seconds.
+  // Reset form to defaults and clear latest proposal save.
+  clearRef.current = () => {
+    formMethods.reset(cloneDeep(realDefaults))
+    setLatestProposalSave({})
+  }
+
+  // Copy link to current draft.
+  copyDraftLinkRef.current = async () => {
+    // Upload data to IPFS.
+    const cid = await uploadJsonToIpfs(proposalData)
+    // Copy link to clipboard.
+    navigator.clipboard.writeText(
+      SITE_URL +
+        getDaoProposalPath(chainContext.config.name, 'create', {
+          pi: cid,
+        })
+    )
+    toast.success(t('info.copiedLinkToClipboard'))
+  }
+
+  const saveQueuedRef = useRef(false)
+  const saveLatestProposalRef = useUpdatingRef(() =>
+    setLatestProposalSave(
+      // If created proposal, clear latest proposal save.
+      proposalCreatedCardProps ? {} : cloneDeep(proposalData)
+    )
+  )
+
+  // Save latest data to atom and thus localStorage every second.
   useEffect(() => {
     // If created proposal, don't save.
-    if (govProposalCreatedCardProps) {
+    if (proposalCreatedCardProps) {
       return
     }
 
-    // Deep clone to prevent values from becoming readOnly.
-    const timeout = setTimeout(
-      () => setLatestProposalSave(cloneDeep(proposalData)),
-      10000
-    )
-    return () => clearTimeout(timeout)
-  }, [govProposalCreatedCardProps, setLatestProposalSave, proposalData])
+    // Queue save in 1 second if not already queued.
+    if (saveQueuedRef.current) {
+      return
+    }
+    saveQueuedRef.current = true
+
+    // Save in one second.
+    setTimeout(() => {
+      saveLatestProposalRef.current()
+      saveQueuedRef.current = false
+    }, 1000)
+  }, [
+    proposalCreatedCardProps,
+    setLatestProposalSave,
+    proposalData,
+    saveLatestProposalRef,
+  ])
 
   const [drafts, setDrafts] = useRecoilState(
     proposalDraftsAtom(localStorageKey)
@@ -421,7 +618,7 @@ const InnerNewGovProposal = ({
         toast.error(t('error.loadingData'))
       }
       // Deep clone to prevent values from being readOnly.
-      reset(draft.proposal.data)
+      reset(cloneDeep(draft.proposal.data))
       setDraftIndex(loadIndex)
     },
     [draftIndex, drafts, reset, t]
@@ -501,30 +698,27 @@ const InnerNewGovProposal = ({
         onSubmit={handleSubmit(onSubmitForm, onSubmitError)}
       >
         <div className="flex flex-col gap-4">
-          <SuspenseLoader fallback={<Loader size={36} />}>
-            <WalletActionsProvider
-              address={
-                // If no wallet address, use a space so that the page still
-                // loads even if there is no wallet connected. An empty string
-                // is falsy which triggers the loader, so use a space instead.
-                walletAddress || ' '
-              }
-            >
-              <action.Component
-                addAction={() => {}}
-                allActionsWithData={[]}
-                data={proposalData}
-                errors={errors}
-                fieldNamePrefix=""
-                index={-1}
-                isCreating
-                remove={() => {}}
-              />
-            </WalletActionsProvider>
-          </SuspenseLoader>
+          <WalletActionsProvider
+            address={
+              // If wallet not connected, use placeholder wallet so it still
+              // loads.
+              walletAddress || getNullWalletForChain(chain.chain_id)
+            }
+          >
+            <action.Component
+              addAction={() => {}}
+              allActionsWithData={[]}
+              data={proposalData}
+              errors={errors}
+              fieldNamePrefix=""
+              index={-1}
+              isCreating
+              remove={() => {}}
+            />
+          </WalletActionsProvider>
         </div>
 
-        <div className="flex flex-col gap-2 border-y border-border-secondary py-6">
+        <div className="border-border-secondary flex flex-col gap-2 border-y py-6">
           <div className="flex flex-row items-center justify-between gap-6">
             <p className="title-text text-text-body">
               {t('info.reviewYourProposal')}
@@ -562,7 +756,10 @@ const InnerNewGovProposal = ({
                   type="submit"
                   value={ProposeSubmitValue.Submit}
                 >
-                  <p>{t('button.publish')}</p>
+                  <p>
+                    {t('button.publish') +
+                      (holdingAltForDirectSign ? ` (${t('info.direct')})` : '')}
+                  </p>
                   <GavelRounded className="!h-4 !w-4" />
                 </Button>
               </Tooltip>
@@ -570,19 +767,19 @@ const InnerNewGovProposal = ({
           </div>
 
           {showSubmitErrorNote && (
-            <p className="secondary-text self-end text-right text-text-interactive-error">
+            <p className="secondary-text text-text-interactive-error self-end text-right">
               {t('error.correctErrorsAbove')}
             </p>
           )}
 
           {!!submitError && (
-            <p className="secondary-text self-end text-right text-text-interactive-error">
+            <p className="secondary-text text-text-interactive-error self-end text-right">
               {submitError}
             </p>
           )}
 
           {showPreview && (
-            <div className="mt-4 rounded-md border border-border-secondary p-6">
+            <div className="border-border-secondary mt-4 rounded-md border p-6">
               <ProposalContentDisplay
                 EntityDisplay={EntityDisplay}
                 createdAt={new Date()}

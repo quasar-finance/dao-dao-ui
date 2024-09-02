@@ -2,28 +2,48 @@ import { Chain } from '@chain-registry/types'
 import { toHex } from '@cosmjs/encoding'
 import { ChainContext, WalletAccount } from '@cosmos-kit/core'
 import { useChain, useManager } from '@cosmos-kit/react-lite'
+import { SecretUtils } from '@keplr-wallet/types'
+import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useRecoilValue } from 'recoil'
+import { useRecoilValue, useSetRecoilState } from 'recoil'
 
+import { chainQueries } from '@dao-dao/state/query'
 import {
+  refreshWalletBalancesIdAtom,
   walletChainIdAtom,
   walletHexPublicKeySelector,
 } from '@dao-dao/state/recoil'
+import { makeGetSignerOptions } from '@dao-dao/state/utils'
 import {
   useCachedLoading,
   useChainContextIfAvailable,
+  useUpdatingRef,
 } from '@dao-dao/stateless'
 import { LoadingData } from '@dao-dao/types'
-import { getSupportedChains, maybeGetChainForChainId } from '@dao-dao/utils'
+import {
+  SecretSigningCosmWasmClient,
+  SupportedSigningCosmWasmClient,
+  getLcdForChainId,
+  getRpcForChainId,
+  getSupportedChains,
+  isSecretNetwork,
+  maybeGetChainForChainId,
+} from '@dao-dao/utils'
 
 export type UseWalletOptions = {
-  // If undefined, defaults to current chain context. If not in a chain context,
-  // falls back to first supported chain.
+  /**
+   * If undefined, defaults to current chain context. If not in a chain context,
+   * falls back to first supported chain.
+   */
   chainId?: string
-  // If true, will return `account` and `hexPublicKey` in response.
+  /**
+   * If true, will return `account` and `hexPublicKey` in response.
+   */
   loadAccount?: boolean
-  // If true, attempt connection if wallet is connected to a different chain but
-  // not the current one.
+  /**
+   * If true, attempt connection if wallet is connected to a different chain but
+   * not the current one.
+   */
   attemptConnection?: boolean
 }
 
@@ -32,6 +52,22 @@ export type UseWalletReturn = Omit<ChainContext, 'chain'> & {
   chain: Chain
   account: WalletAccount | undefined
   hexPublicKey: LoadingData<string>
+  /**
+   * Fetch the Secret Network signing client for the current wallet.
+   */
+  getSecretSigningCosmWasmClient: () => Promise<SecretSigningCosmWasmClient>
+  /**
+   * Fetch the relevant signing client for the current wallet.
+   */
+  getSigningClient: () => Promise<SupportedSigningCosmWasmClient>
+  /**
+   * Fetch SecretUtils from the wallet if available.
+   */
+  getSecretUtils: () => SecretUtils
+  /**
+   * Refresh wallet balances.
+   */
+  refreshBalances: () => void
 }
 
 export const useWallet = ({
@@ -52,11 +88,10 @@ export const useWallet = ({
       : currentChain || maybeGetChainForChainId(walletChainId)) ||
     getSupportedChains()[0].chain
 
-  const _walletChain = useChain(chain.chain_name)
+  const _walletChain = useChain(chain.chain_name, false)
   // Memoize wallet chain since it changes every render. The hook above forces
   // re-render when address changes, so this is safe.
-  const walletChainRef = useRef(_walletChain)
-  walletChainRef.current = _walletChain
+  const walletChainRef = useUpdatingRef(_walletChain)
 
   // Chain of main wallet connection.
   const mainWalletChainId = useRecoilValue(walletChainIdAtom)
@@ -67,8 +102,7 @@ export const useWallet = ({
   const mainWalletConnected = !!mainWallet?.isWalletConnected
   // Memoize wallet chain since it changes every render. The hook above forces
   // re-render when address changes, so this is safe.
-  const mainWalletRef = useRef(mainWallet)
-  mainWalletRef.current = mainWallet
+  const mainWalletRef = useUpdatingRef(mainWallet)
 
   // Only attempt connection once per enable.
   const attemptedConnection = useRef(false)
@@ -82,7 +116,7 @@ export const useWallet = ({
   const connect = useCallback(() => {
     if (mainWalletConnected && mainWalletRef.current) {
       return walletChainRef.current.walletRepo
-        .connect(mainWalletRef.current.walletName)
+        .connect(mainWalletRef.current.walletName, false)
         .catch(console.error)
     } else {
       return walletChainRef.current.connect()
@@ -113,6 +147,7 @@ export const useWallet = ({
     attemptConnection,
     connect,
     _walletChain.isWalletConnected,
+    mainWalletRef,
   ])
 
   const [account, setAccount] = useState<WalletAccount>()
@@ -155,24 +190,131 @@ export const useWallet = ({
   }, [
     account?.address,
     loadAccount,
+    walletChainRef,
     walletChainRef.current.address,
     walletChainRef.current.chain.chain_id,
     walletChainRef.current.status,
   ])
 
+  // Pre-fetch dynamic gas price for this chain when the wallet is used.
+  const queryClient = useQueryClient()
+  useEffect(() => {
+    queryClient.prefetchQuery({
+      ...chainQueries.dynamicGasPrice({ chainId: chain.chain_id }),
+      // Make stale in less than a minute so it refreshes in the
+      // `useAutoRefreshData` hook that runs every minute.
+      staleTime: 50 * 1000,
+    })
+  }, [queryClient, chain.chain_id])
+
+  const setRefreshWalletBalancesId = useSetRecoilState(
+    refreshWalletBalancesIdAtom(walletChainRef.current.address ?? '')
+  )
+  const refreshBalances = useCallback(() => {
+    const address = walletChainRef.current.address
+
+    // Refresh Recoil balance selectors.
+    setRefreshWalletBalancesId((id) => id + 1)
+
+    // Invalidate native and staked balances.
+    queryClient.invalidateQueries({
+      queryKey: [
+        'chain',
+        'nativeBalance',
+        {
+          chainId,
+          ...(address && { address }),
+        },
+      ],
+    })
+    queryClient.invalidateQueries({
+      queryKey: [
+        'chain',
+        'nativeStakedBalance',
+        {
+          chainId,
+          ...(address && { address }),
+        },
+      ],
+    })
+    // Invalidate validators.
+    queryClient.invalidateQueries({
+      queryKey: ['chain', 'validator', { chainId }],
+    })
+    // Then native delegation info.
+    queryClient.invalidateQueries({
+      queryKey: chainQueries.nativeDelegationInfo(queryClient, {
+        chainId,
+        ...(address && { address }),
+      } as any).queryKey,
+    })
+  }, [chainId, queryClient, setRefreshWalletBalancesId, walletChainRef])
+
   const response = useMemo(
-    (): UseWalletReturn => ({
-      ...walletChainRef.current,
-      connect,
-      // Use chain from our version of the chain-registry.
-      chain,
-      account,
-      hexPublicKey: hexPublicKeyData
-        ? { loading: false, data: hexPublicKeyData }
-        : !hexPublicKeyFromChain.loading && hexPublicKeyFromChain.data
-        ? { loading: false, data: hexPublicKeyFromChain.data }
-        : { loading: true },
-    }),
+    (): UseWalletReturn => {
+      // TODO(secret): support different enigma utils sources based on connected
+      // wallet
+      const getSecretUtils = () => {
+        const secretUtils = window.keplr?.getEnigmaUtils(chain.chain_id)
+        if (!secretUtils) {
+          throw new Error('No Secret utils found')
+        }
+        return secretUtils
+      }
+
+      // Get Secret Network signing client with Keplr's encryption utils.
+      const getSecretSigningCosmWasmClient = async () => {
+        if (!isSecretNetwork(chain.chain_id)) {
+          throw new Error('Not on Secret Network')
+        }
+
+        const signer = walletChainRef.current.getOfflineSignerAmino()
+
+        return await SecretSigningCosmWasmClient.secretConnectWithSigner(
+          getRpcForChainId(chain.chain_id),
+          signer,
+          makeGetSignerOptions(queryClient)(chain),
+          {
+            url: getLcdForChainId(chain.chain_id),
+            chainId: chain.chain_id,
+            wallet: signer,
+            walletAddress: walletChainRef.current.address,
+            encryptionUtils: getSecretUtils(),
+          }
+        )
+      }
+
+      // Get relevant signing client based on chain.
+      const getSigningClient = isSecretNetwork(chain.chain_id)
+        ? getSecretSigningCosmWasmClient
+        : walletChainRef.current.getSigningCosmWasmClient
+
+      return {
+        ...walletChainRef.current,
+        chainWallet:
+          walletChainRef.current.chainWallet ||
+          // Fallback to getting chain wallet from repo if not set on
+          // walletChain. This won't be set if the walletChain is disconnected.
+          (mainWalletRef.current
+            ? getWalletRepo(chain.chain_name).getWallet(
+                mainWalletRef.current.walletName
+              )
+            : undefined),
+        connect,
+        // Use chain from our version of the chain-registry.
+        chain,
+        account,
+        hexPublicKey: hexPublicKeyData
+          ? { loading: false, data: hexPublicKeyData }
+          : !hexPublicKeyFromChain.loading && hexPublicKeyFromChain.data
+          ? { loading: false, data: hexPublicKeyFromChain.data }
+          : { loading: true },
+        getSecretSigningCosmWasmClient,
+        getSigningClient,
+        getSecretUtils,
+        refreshBalances,
+      }
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       connect,
@@ -183,6 +325,8 @@ export const useWallet = ({
       walletChainRef.current?.chain.chain_id,
       walletChainRef.current?.status,
       hexPublicKeyFromChain,
+      queryClient,
+      refreshBalances,
     ]
   )
 

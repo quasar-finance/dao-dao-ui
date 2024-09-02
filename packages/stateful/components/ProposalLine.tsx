@@ -1,40 +1,62 @@
 import { useTranslation } from 'react-i18next'
 
-import { ChainProvider, LineLoader, WarningCard } from '@dao-dao/stateless'
+import {
+  LineLoader,
+  StatusCard,
+  useDaoContextIfAvailable,
+} from '@dao-dao/stateless'
 import { StatefulProposalLineProps } from '@dao-dao/types'
 
 import {
   ProposalModuleAdapterProvider,
   useProposalModuleAdapter,
 } from '../proposal-module-adapter'
+import { DaoProviders } from './dao'
 import { LinkWrapper } from './LinkWrapper'
 import { SuspenseLoader } from './SuspenseLoader'
 
 export const ProposalLine = ({
   chainId,
   coreAddress,
-  proposalModules,
   proposalId,
   ...props
-}: StatefulProposalLineProps) => (
-  <ChainProvider chainId={chainId}>
-    <ProposalModuleAdapterProvider
-      coreAddress={coreAddress}
-      proposalId={proposalId}
-      proposalModules={proposalModules}
-    >
+}: StatefulProposalLineProps) => {
+  const existingDao = useDaoContextIfAvailable()?.dao
+
+  const content = (
+    <ProposalModuleAdapterProvider proposalId={proposalId}>
       <InnerProposalLine {...props} />
     </ProposalModuleAdapterProvider>
-  </ChainProvider>
-)
+  )
+
+  // If already in this DAO's context, no need to wrap in another provider.
+  if (
+    existingDao &&
+    existingDao.chainId === chainId &&
+    existingDao.coreAddress === coreAddress
+  ) {
+    return content
+  }
+
+  return (
+    <DaoProviders
+      chainId={chainId}
+      coreAddress={coreAddress}
+      loaderFallback={<LineLoader type="proposal" />}
+    >
+      {content}
+    </DaoProviders>
+  )
+}
 
 type InnerProposalLineProps = Pick<
   StatefulProposalLineProps,
-  'proposalViewUrl' | 'isPreProposeProposal'
+  'proposalViewUrl' | 'isPreProposeProposal' | 'onClick'
 >
 
 const InnerProposalLine = ({
   proposalViewUrl,
+  onClick,
   isPreProposeProposal,
 }: InnerProposalLineProps) => {
   const { t } = useTranslation()
@@ -46,12 +68,21 @@ const InnerProposalLine = ({
     ? PreProposeApprovalProposalLine
     : ProposalLine
   if (!Component) {
-    return <WarningCard content={t('error.unsupportedApprovalFailedRender')} />
+    return (
+      <StatusCard
+        content={t('error.unsupportedApprovalFailedRender')}
+        style="warning"
+      />
+    )
   }
 
   return (
     <SuspenseLoader fallback={<LineLoader type="proposal" />}>
-      <Component LinkWrapper={LinkWrapper} href={proposalViewUrl} />
+      <Component
+        LinkWrapper={LinkWrapper}
+        href={proposalViewUrl}
+        onClick={onClick}
+      />
     </SuspenseLoader>
   )
 }

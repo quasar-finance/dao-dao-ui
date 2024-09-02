@@ -1,3 +1,4 @@
+import uniqBy from 'lodash.uniqby'
 import { useRouter } from 'next/router'
 import { ReactNode, useCallback, useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
@@ -7,7 +8,7 @@ import { useRecoilState, useRecoilValue, waitForAll } from 'recoil'
 import {
   betaWarningAcceptedAtom,
   commandModalVisibleAtom,
-  govProposalCreatedCardPropsAtom,
+  followingDaoDropdownInfosSelector,
   mountedInBrowserAtom,
   navigationCompactAtom,
   proposalCreatedCardPropsAtom,
@@ -16,7 +17,6 @@ import {
 import {
   BetaWarningModal,
   ChainProvider,
-  GovProposalCreatedModal,
   ProposalCreatedModal,
   DappLayout as StatelessDappLayout,
   useAppContext,
@@ -26,16 +26,13 @@ import {
 import { getSupportedChains, maybeGetChainForChainId } from '@dao-dao/utils'
 
 import { CommandModal } from '../command'
-import { useAutoRefreshData, useWallet, useWalletInfo } from '../hooks'
-import {
-  daoCreatedCardPropsAtom,
-  followingDaoDropdownInfosSelector,
-} from '../recoil'
+import { useAutoRefreshData, useProfile, useWallet } from '../hooks'
+import { daoCreatedCardPropsAtom } from '../recoil'
 import { ButtonLink } from './ButtonLink'
 import { DaoCreatedModal } from './DaoCreatedModal'
 import { LinkWrapper } from './LinkWrapper'
-import { MigrateFollowingModal } from './MigrateFollowingModal'
-import { DockWallet, SidebarWallet } from './NavWallet'
+import { DockWallet } from './NavWallet'
+import { StatefulPageHeader } from './PageHeader'
 import { WalletModals } from './wallet'
 
 export const DappLayout = ({ children }: { children: ReactNode }) => {
@@ -69,8 +66,6 @@ export const DappLayout = ({ children }: { children: ReactNode }) => {
   )
   const [proposalCreatedCardProps, setProposalCreatedCardProps] =
     useRecoilState(proposalCreatedCardPropsAtom)
-  const [govProposalCreatedCardProps, setGovProposalCreatedCardProps] =
-    useRecoilState(govProposalCreatedCardPropsAtom)
 
   const { rootCommandContextMaker, inbox } = useAppContext()
   // Type-check, should always be loaded for dapp.
@@ -79,7 +74,6 @@ export const DappLayout = ({ children }: { children: ReactNode }) => {
   }
 
   const { openView, isWalletConnected } = useWallet()
-  const { walletHexPublicKey } = useWalletInfo()
 
   //! COMMAND MODAL
   // Hide modal when we nav away.
@@ -128,13 +122,13 @@ export const DappLayout = ({ children }: { children: ReactNode }) => {
   useAutoRefreshData()
 
   //! Following DAOs
+  const { uniquePublicKeys } = useProfile()
   const followingDaoDropdownInfos = useCachedLoading(
-    walletHexPublicKey
+    !uniquePublicKeys.loading
       ? waitForAll(
-          getSupportedChains().map(({ chain }) =>
+          uniquePublicKeys.data.map(({ publicKey }) =>
             followingDaoDropdownInfosSelector({
-              chainId: chain.chain_id,
-              walletPublicKey: walletHexPublicKey,
+              walletPublicKey: publicKey,
               // If not compact, remove any SubDAO from the top level that
               // exists as a SubDAO of another followed DAO at the top level.
               // When compact, SubDAOs aren't visible, so we should show
@@ -154,29 +148,33 @@ export const DappLayout = ({ children }: { children: ReactNode }) => {
       <StatelessDappLayout
         ButtonLink={ButtonLink}
         DockWallet={DockWallet}
+        PageHeader={StatefulPageHeader}
         connect={openView}
+        inboxCount={
+          inbox.loading ||
+          // Prevent hydration errors by loading until mounted.
+          !mountedInBrowser
+            ? {
+                loading: true,
+              }
+            : {
+                loading: false,
+                data: inbox.items.length,
+              }
+        }
         navigationProps={{
           walletConnected: isWalletConnected,
           LinkWrapper,
-          inboxCount:
-            inbox.loading ||
-            // Prevent hydration errors by loading until mounted.
-            !mountedInBrowser
-              ? {
-                  loading: true,
-                }
-              : {
-                  loading: false,
-                  data: inbox.items.length,
-                },
           setCommandModalVisible: () => setCommandModalVisible(true),
           followingDaos: mountedInBrowser
             ? followingDaoDropdownInfos.loading
               ? { loading: true }
               : {
                   loading: false,
-                  data: followingDaoDropdownInfos.data
-                    .flat()
+                  data: uniqBy(
+                    followingDaoDropdownInfos.data.flat(),
+                    (d) => d.chainId + d.coreAddress
+                  )
                     // Alphabetize.
                     .sort((a, b) => a.name.localeCompare(b.name)),
                 }
@@ -185,7 +183,6 @@ export const DappLayout = ({ children }: { children: ReactNode }) => {
           compact,
           setCompact,
           mountedInBrowser,
-          SidebarWallet,
         }}
       >
         {children}
@@ -203,7 +200,6 @@ export const DappLayout = ({ children }: { children: ReactNode }) => {
             visible={commandModalVisible}
           />
         )}
-        <MigrateFollowingModal />
 
         {daoCreatedCardProps && (
           <DaoCreatedModal
@@ -211,7 +207,6 @@ export const DappLayout = ({ children }: { children: ReactNode }) => {
             modalProps={{
               onClose: () => setDaoCreatedCardProps(undefined),
             }}
-            subDao={!!daoCreatedCardProps.parentDao}
           />
         )}
 
@@ -223,18 +218,6 @@ export const DappLayout = ({ children }: { children: ReactNode }) => {
             }}
             modalProps={{
               onClose: () => setProposalCreatedCardProps(undefined),
-            }}
-          />
-        )}
-
-        {govProposalCreatedCardProps && (
-          <GovProposalCreatedModal
-            itemProps={{
-              ...govProposalCreatedCardProps,
-              LinkWrapper,
-            }}
-            modalProps={{
-              onClose: () => setGovProposalCreatedCardProps(undefined),
             }}
           />
         )}

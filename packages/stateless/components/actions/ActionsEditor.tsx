@@ -22,7 +22,7 @@ import {
   LoadedActions,
 } from '@dao-dao/types/actions'
 
-import { useDaoInfoContextIfAvailable } from '../../hooks'
+import { useDaoInfoContextIfAvailable } from '../../contexts'
 import { IconButton } from '../icon_buttons'
 import { PAGINATION_MIN_PAGE, Pagination } from '../Pagination'
 import { Tooltip } from '../tooltip'
@@ -37,6 +37,7 @@ export type ActionsEditorProps = {
   actionDataFieldName: string
   actionDataErrors: FieldErrors<ActionKeyAndData[]> | undefined
   className?: string
+  hideEmptyPlaceholder?: boolean
   SuspenseLoader: ComponentType<SuspenseLoaderProps>
 }
 
@@ -57,6 +58,7 @@ export const ActionsEditor = ({
   actionDataFieldName,
   actionDataErrors,
   className,
+  hideEmptyPlaceholder,
   SuspenseLoader,
 }: ActionsEditorProps) => {
   const { t } = useTranslation()
@@ -142,16 +144,22 @@ export const ActionsEditor = ({
           ))}
         </div>
       ) : (
-        <p className="secondary-text -mt-3 max-w-prose italic">
-          {t('info.noActionsAdded', {
-            context: isDao ? 'dao' : undefined,
-          })}
-        </p>
+        !hideEmptyPlaceholder && (
+          <p className="secondary-text -mt-3 max-w-prose italic">
+            {t('info.noActionsAdded', {
+              context: isDao ? 'dao' : undefined,
+            })}
+          </p>
+        )
       )}
 
       <ActionLibrary
         actionDataFieldName={actionDataFieldName}
         categories={categories}
+        defaultOpen={
+          // Default open only if no actions exist yet.
+          groupedActionData.length === 0
+        }
         loadedActions={loadedActions}
         onSelect={() => {
           // Enable scrolling to new actions once an action is selected for the
@@ -283,6 +291,7 @@ export const ActionEditor = ({
                     if (scrollToNewActions) {
                       node.scrollIntoView({
                         behavior: 'smooth',
+                        block: 'center',
                       })
                     }
                   }

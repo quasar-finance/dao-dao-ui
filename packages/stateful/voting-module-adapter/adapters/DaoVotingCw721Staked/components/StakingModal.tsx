@@ -73,11 +73,12 @@ const InnerStakingModal = ({
     refreshClaims,
     loadingWalletStakedNfts,
     loadingWalletUnstakedNfts,
+    unstakingDuration,
   } = useStakingInfo({
     fetchClaims: true,
     fetchTotalStakedValue: false,
     fetchWalletStakedValue: true,
-    fetchWalletUnstakedValue: true,
+    fetchWalletUnstakedNfts: true,
   })
 
   const hasStake =
@@ -284,6 +285,7 @@ const InnerStakingModal = ({
       selectedKeys={currentTokenIds.map((tokenId) =>
         getNftKey(chainId, collectionAddress, tokenId)
       )}
+      unstakingDuration={unstakingDuration}
       visible={visible}
     />
   )

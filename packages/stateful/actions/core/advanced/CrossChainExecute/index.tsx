@@ -126,7 +126,7 @@ export const makeCrossChainExecuteAction: ActionMaker<
   const useDecodedCosmosMsg: UseDecodedCosmosMsg<CrossChainExecuteData> = (
     msg: Record<string, any>
   ) => {
-    const decodedPolytone = decodePolytoneExecuteMsg(currentChainId, msg)
+    const decodedPolytone = decodePolytoneExecuteMsg(currentChainId, msg, 'any')
 
     return decodedPolytone.match
       ? {
@@ -162,6 +162,7 @@ export const makeCrossChainExecuteAction: ActionMaker<
     useTransformToCosmos,
     useDecodedCosmosMsg,
     // Disallow creation if no accounts created.
-    hideFromPicker: Object.values(context.info.polytoneProxies).length === 0,
+    hideFromPicker:
+      Object.values(context.dao.info.polytoneProxies).length === 0,
   }
 }

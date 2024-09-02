@@ -2,30 +2,8 @@ import { useWallet } from '@cosmos-kit/react-lite'
 import { useRecoilState } from 'recoil'
 
 import { walletChainIdAtom } from '@dao-dao/state/recoil'
-import { ChainPickerPopup, ChainPickerPopupProps } from '@dao-dao/stateless'
-
-export type WalletChainSwitcherProps = {
-  /**
-   * The chain type to show. Supported chains have native DAO DAO deployments,
-   * whereas configured chains include supported chains and others which show up
-   * in the UI in various places, such as the governance UI.
-   */
-  type?: 'supported' | 'configured'
-  /**
-   * Chain IDs to exclude.
-   */
-  excludeChainIds?: string[]
-} & Omit<
-  ChainPickerPopupProps,
-  | 'chains'
-  | 'selectedChainId'
-  | 'onSelect'
-  | 'labelMode'
-  | 'showNone'
-  | 'noneLabel'
-  | 'NoneIcon'
-> &
-  Partial<Pick<ChainPickerPopupProps, 'onSelect'>>
+import { ChainPickerPopup } from '@dao-dao/stateless'
+import { WalletChainSwitcherProps } from '@dao-dao/types'
 
 /**
  * A chain switcher that shows only supported chains and controls the global
@@ -62,14 +40,10 @@ export const WalletChainSwitcher = ({
           .find(
             (wallet) => wallet.chainId === chainId && !wallet.isWalletConnected
           )
-          ?.connect()
+          ?.connect(false)
           .catch(console.error)
       }}
       selectedChainId={chainId}
     />
   )
 }
-
-export const WalletConfiguredChainSwitcherHeader = (
-  props: Omit<WalletChainSwitcherProps, 'type'>
-) => <WalletChainSwitcher {...props} headerMode type="configured" />

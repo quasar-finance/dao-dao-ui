@@ -1,17 +1,18 @@
 {
   "name": "@dao-dao/types",
-  "version": "2.2.0",
+  "version": "2.5.0-rc.2",
   "license": "BSD-3-Clause-Clear",
   "scripts": {
+    "lint": "eslint .",
     "format": "eslint . --fix",
-    "lint": "eslint ."
+    "protobuf:codegen": "node protobuf/scripts/codegen.js",
+    "protobuf:patch": "git apply protobuf/patches.diff",
+    "protobuf:patch:update": "cd protobuf && npm run protobuf:codegen && git diff -R codegen/ > patches.diff && npm run protobuf:patch",
+    "protobuf": "npm run protobuf:codegen && npm run protobuf:patch"
   },
-  "dependencies": {},
-  "devDependencies": {
-    "@chain-registry/types": "^0.17.1",
-    "@cosmjs/cosmwasm-stargate": "^0.32.1",
-    "@cosmos-kit/web3auth": "^2.4.12",
-    "@dao-dao/config": "2.2.0",
+  "dependencies": {
+    "@chain-registry/types": "^0.41.3",
+    "@cosmos-kit/web3auth": "^2.8.0",
     "next-i18next": "^11.0.0",
     "pusher-js": "^7.6.0",
     "react": "^18.2.0",
@@ -20,9 +21,16 @@
     "recoil": "^0.7.2",
     "typescript": "5.3.3"
   },
+  "devDependencies": {
+    "@cosmjs/cosmwasm-stargate": "^0.32.3",
+    "@cosmology/telescope": "^1.8.3",
+    "@dao-dao/config": "2.5.0-rc.2",
+    "@tanstack/react-query": "^5.40.0"
+  },
   "peerDependencies": {
     "next": "^12 || ^13",
     "react": "^17 || ^18"
   },
-  "prettier": "@dao-dao/config/prettier"
+  "prettier": "@dao-dao/config/prettier",
+  "gitHead": "d7b959f412c3990123b0e2afb11f32acd9c3764c"
 }

@@ -2,8 +2,10 @@ import clsx from 'clsx'
 import { useFormContext } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 
-import { useChainContext, useDaoInfoContextIfAvailable } from '../../hooks'
-import { ChainPickerPopup, ChainPickerPopupProps } from '../popup'
+import { ChainPickerPopupProps } from '@dao-dao/types'
+
+import { useChainContext, useDaoInfoContextIfAvailable } from '../../contexts'
+import { ChainPickerPopup } from '../popup'
 import { InputLabel } from './InputLabel'
 
 export type DaoSupportedChainPickerInputProps = {

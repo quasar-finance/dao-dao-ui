@@ -1,5 +1,5 @@
 import Pusher from 'pusher-js'
-import { atom, selector, selectorFamily } from 'recoil'
+import { selector, selectorFamily, waitForAllSettled } from 'recoil'
 
 import {
   Expiration,
@@ -7,65 +7,127 @@ import {
   IndexerUpStatus,
   WithChainId,
 } from '@dao-dao/types'
+import { ProposalStatus } from '@dao-dao/types/protobuf/codegen/cosmos/gov/v1/gov'
 import {
   CommonError,
   WEB_SOCKET_PUSHER_APP_KEY,
   WEB_SOCKET_PUSHER_HOST,
   WEB_SOCKET_PUSHER_PORT,
-  getSupportedChainConfig,
+  getSupportedChains,
 } from '@dao-dao/utils'
 
 import {
+  DaoProposalSearchResult,
   DaoSearchResult,
+  GovProposalSearchResult,
   QueryIndexerOptions,
   QuerySnapperOptions,
+  SearchDaoProposalsOptions,
   SearchDaosOptions,
+  SearchGovProposalsOptions,
+  getRecentDaoProposals,
   loadMeilisearchClient,
   queryIndexer,
   queryIndexerUpStatus,
   querySnapper,
   searchDaos,
+  searchGovProposals,
 } from '../../indexer'
 import {
+  refreshGovProposalsAtom,
   refreshIndexerUpStatusAtom,
   refreshOpenProposalsAtom,
   refreshWalletProposalStatsAtom,
 } from '../atoms'
 
 export type QueryIndexerParams = QueryIndexerOptions & {
-  // Refresh by changing this value.
+  /**
+   * Refresh by changing this value.
+   */
   id?: number
+  /**
+   * If there is no fallback query available, still query even if indexer is
+   * behind. Defaults to `false`.
+   */
+  noFallback?: boolean
 }
 
 export const queryIndexerSelector = selectorFamily<any, QueryIndexerParams>({
   key: 'queryIndexer',
-  get: (options) => async () => {
-    try {
-      return await queryIndexer(options)
-    } catch (err) {
-      // If the indexer fails, return null since many indexer queries fallback
-      // to the chain. If an error other than no indexer for chain, log it.
-      if (
-        !(err instanceof Error) ||
-        err.message !== CommonError.NoIndexerForChain
-      ) {
+  get:
+    (options) =>
+    async ({ get }) => {
+      try {
+        const indexerUp = get(
+          indexerUpStatusSelector({
+            chainId: options.chainId,
+            // Don't refresh this automatically on a period, since some
+            // selectors that are not cached will use this, and they will cause
+            // annoying flickering in the UI. Ideally, we replace all
+            // `useRecoilValue` blocking hooks with `useCachedLoadingWithError`
+            // hooks that cache data during updates. Once that happens, we can
+            // remove this. But that might not happen for a while...
+            noRefresh: true,
+            // Manually refresh.
+            id: options.id,
+          })
+        )
+
+        // If indexer is behind and there is a fallback, return null.
+        if (!indexerUp.caughtUp && !options.noFallback) {
+          return null
+        }
+      } catch (err) {
+        // If no indexer for chain, return null.
+        if (
+          err instanceof Error &&
+          err.message === CommonError.NoIndexerForChain
+        ) {
+          return null
+        }
+
+        // Recoil throws promises when waiting for other selectors to finish,
+        // and we don't want to prevent that.
+        if (err instanceof Promise) {
+          throw err
+        }
+
         console.error(err)
+        return null
       }
 
-      return null
-    }
-  },
+      try {
+        return await queryIndexer(options)
+      } catch (err) {
+        console.error(err)
+
+        return null
+      }
+    },
 })
 
 export const indexerUpStatusSelector = selectorFamily<
   IndexerUpStatus,
-  WithChainId<{}>
+  WithChainId<{
+    /**
+     * If true, does not refresh the indexer status. Defaults to false. This is
+     * useful if you want to check the indexer status one time. The refresh
+     * occurs periodically to update status on the status page.
+     */
+    noRefresh?: boolean
+    /**
+     * Change this value to manually refresh.
+     */
+    id?: number
+  }>
 >({
   key: 'indexerUpStatus',
   get:
-    (params) =>
+    ({ noRefresh = false, ...params }) =>
     async ({ get }) => {
-      get(refreshIndexerUpStatusAtom)
+      if (!noRefresh) {
+        get(refreshIndexerUpStatusAtom)
+      }
 
       return await queryIndexerUpStatus(params)
     },
@@ -162,6 +224,79 @@ export const searchDaosSelector = selectorFamily<
   get: (options) => async () => await searchDaos(options),
 })
 
+export const searchGovProposalsSelector = selectorFamily<
+  {
+    results: GovProposalSearchResult[]
+    total: number
+  },
+  SearchGovProposalsOptions
+>({
+  key: 'searchGovProposals',
+  get:
+    (options) =>
+    async ({ get }) => {
+      get(refreshGovProposalsAtom(options.chainId))
+      if (
+        options.status === ProposalStatus.PROPOSAL_STATUS_DEPOSIT_PERIOD ||
+        options.status === ProposalStatus.PROPOSAL_STATUS_VOTING_PERIOD
+      ) {
+        get(refreshOpenProposalsAtom)
+      }
+
+      return await searchGovProposals(options)
+    },
+})
+
+/**
+ * Get recent DAO proposals for a chain.
+ */
+export const chainRecentDaoProposalsSelector = selectorFamily<
+  DaoProposalSearchResult[],
+  SearchDaoProposalsOptions
+>({
+  key: 'chainRecentDaoProposals',
+  get: (options) => async () => await getRecentDaoProposals(options),
+})
+
+/**
+ * Get recent DAO proposals across all supported chains.
+ */
+export const recentDaoProposalsSelector = selectorFamily<
+  DaoProposalSearchResult[],
+  Omit<SearchDaoProposalsOptions, 'chainId'>
+>({
+  key: 'recentDaoProposals',
+  get:
+    (options) =>
+    async ({ get }) => {
+      const chains = getSupportedChains({ hasIndexer: true })
+
+      // Get options.limit most recent across all chains by getting
+      // options.limit most recent per-chain, sorting, and then slicing only the
+      // first options.limit.
+      const all = get(
+        waitForAllSettled(
+          chains.map(({ chainId }) =>
+            chainRecentDaoProposalsSelector({
+              ...options,
+              chainId,
+            })
+          )
+        )
+      )
+        .flatMap((loadable) => loadable.valueMaybe() || [])
+        // Most recent first.
+        .sort(
+          (a, b) =>
+            b.value.proposal.start_height - a.value.proposal.start_height
+        )
+        // Get N most recent across all chains.
+        .slice(0, options.limit)
+
+      return all
+    },
+})
+
 export const openProposalsSelector = selectorFamily<
   {
     proposalModuleAddress: string
@@ -185,6 +320,7 @@ export const openProposalsSelector = selectorFamily<
           chainId,
           id,
           args: { address },
+          noFallback: true,
         })
       )
       return openProposals ?? []
@@ -209,6 +345,7 @@ export const walletProposalStatsSelector = selectorFamily<
           formula: 'proposals/stats',
           chainId,
           id,
+          noFallback: true,
         })
       )
 
@@ -219,35 +356,6 @@ export const walletProposalStatsSelector = selectorFamily<
         }
       )
     },
-})
-
-export const walletAdminOfDaosSelector = selectorFamily<
-  string[],
-  WithChainId<{ walletAddress: string }>
->({
-  key: 'walletAdminOfDaos',
-  get:
-    ({ walletAddress, chainId }) =>
-    ({ get }) => {
-      const walletAdminOfDaos: string[] = get(
-        queryWalletIndexerSelector({
-          chainId,
-          walletAddress,
-          formula: 'daos/adminOf',
-        })
-      )
-
-      return walletAdminOfDaos && Array.isArray(walletAdminOfDaos)
-        ? walletAdminOfDaos
-        : []
-    },
-})
-
-export const indexerWebSocketChannelSubscriptionsAtom = atom<
-  Partial<Record<string, number>>
->({
-  key: 'indexerWebSocketChannelSubscriptions',
-  default: {},
 })
 
 export const indexerWebSocketSelector = selector({
@@ -270,38 +378,4 @@ export const indexerMeilisearchClientSelector = selector({
   key: 'indexerMeilisearchClient',
   get: () => loadMeilisearchClient(),
   dangerouslyAllowMutability: true,
-})
-
-/**
- * Featured DAOs on a given chain.
- */
-export const indexerFeaturedDaosSelector = selectorFamily<
-  {
-    address: string
-    order: number
-  }[],
-  string
->({
-  key: 'indexerFeaturedDaos',
-  get:
-    (chainId) =>
-    async ({ get }) => {
-      const config = getSupportedChainConfig(chainId)
-      if (!config) {
-        return []
-      }
-
-      const featuredDaos: {
-        address: string
-        order: number
-      }[] =
-        get(
-          queryGenericIndexerSelector({
-            chainId,
-            formula: 'featuredDaos',
-          })
-        ) || []
-
-      return featuredDaos
-    },
 })

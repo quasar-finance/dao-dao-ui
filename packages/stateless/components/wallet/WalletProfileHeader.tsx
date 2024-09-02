@@ -1,19 +1,28 @@
 import clsx from 'clsx'
+import { useTranslation } from 'react-i18next'
 
 import { WalletProfileHeaderProps } from '@dao-dao/types'
 
 import { ProfileImage, ProfileNameDisplayAndEditor } from '../profile'
+import { StatusCard } from '../StatusCard'
 
 export const WalletProfileHeader = ({
   editable,
-  profileData,
-  updateProfileName,
+  profile,
+  mergeProfileType,
+  openMergeProfilesModal,
+  updateProfile,
   openProfileNftUpdate,
   className,
   children,
 }: WalletProfileHeaderProps) => {
+  const { t } = useTranslation()
   const canEditProfile =
-    editable && !profileData.loading && profileData.profile.nonce >= 0
+    editable &&
+    profile &&
+    !profile.loading &&
+    profile.data.nonce >= 0 &&
+    !mergeProfileType
 
   return (
     <div
@@ -22,19 +31,41 @@ export const WalletProfileHeader = ({
         className
       )}
     >
+      {editable &&
+        profile &&
+        !profile.loading &&
+        profile.data.nonce > -1 &&
+        mergeProfileType && (
+          <StatusCard
+            className="max-w-xs mb-4 text-left"
+            content={
+              mergeProfileType === 'add'
+                ? t('info.addWalletToProfileToEdit')
+                : t('info.noEditUntilProfileMerge')
+            }
+            onClick={openMergeProfilesModal}
+            size="sm"
+            style="warning"
+          />
+        )}
+
       <ProfileImage
-        imageUrl={profileData.profile.imageUrl}
-        loading={profileData.loading}
-        onEdit={canEditProfile ? openProfileNftUpdate : undefined}
-        size="xl"
+        imageUrl={
+          !profile || profile.loading ? undefined : profile.data.imageUrl
+        }
+        loading={profile?.loading}
+        onClick={canEditProfile ? openProfileNftUpdate : undefined}
+        size="header"
       />
 
-      <ProfileNameDisplayAndEditor
-        editingContainerClassName="h-8 !min-w-72"
-        nameClassName="!font-bold !text-2xl"
-        updateProfileName={canEditProfile ? updateProfileName : undefined}
-        walletProfileData={profileData}
-      />
+      {profile && (
+        <ProfileNameDisplayAndEditor
+          header
+          hideNoNameTooltip
+          profile={profile}
+          updateProfile={canEditProfile ? updateProfile : undefined}
+        />
+      )}
 
       {children}
     </div>

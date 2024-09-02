@@ -12,9 +12,22 @@ import { TokenInfoResponse } from './contracts/Cw20Base'
 import { LoadingData, LoadingDataWithError } from './misc'
 
 export enum TokenType {
+  /**
+   * Native token.
+   */
   Native = 'native',
+  /**
+   * CosmWasm token.
+   */
   Cw20 = 'cw20',
+  /**
+   * CosmWasm NFT.
+   */
   Cw721 = 'cw721',
+  /**
+   * OmniFlix ONFT.
+   */
+  Onft = 'onft',
 }
 
 export type GenericTokenSource = Pick<
@@ -24,15 +37,40 @@ export type GenericTokenSource = Pick<
 
 // A native or CW20 token.
 export type GenericToken = {
-  // What chain this token lives on.
+  /**
+   * What chain this token exists on.
+   */
   chainId: string
+  /**
+   * The type of this token.
+   */
   type: TokenType
+  /**
+   * The native denom or contract address for this token. Denom when type is
+   * native, and contract address when type is cw20/cw721.
+   */
   denomOrAddress: string
+  /**
+   * SNIP-20 code hash if isSecretNetwork(chainId) && type === TokenType.Cw20
+   */
+  snip20CodeHash?: string | null
+  /**
+   * The symbol for this token.
+   */
   symbol: string
+  /**
+   * The decimals for this token.
+   */
   decimals: number
+  /**
+   * The image URL for this token.
+   */
   imageUrl: string | undefined
-  // The source chain and base denom. For IBC assets, this should differ from
-  // the main fields.
+  /**
+   * The source chain and base denom. For IBC assets, this should differ from
+   * the main fields. If the source chain ID is the same as the main chain ID,
+   * then the type and denomOrAddress should be the same too.
+   */
   source: GenericTokenSource
 }
 
@@ -181,7 +219,7 @@ export type TokenInfoResponseWithAddressAndLogo = TokenInfoResponse & {
 
 export type AmountWithTimestamp = {
   amount: number
-  timestamp: Date
+  timestamp: number
 }
 
 export enum TokenPriceHistoryRange {

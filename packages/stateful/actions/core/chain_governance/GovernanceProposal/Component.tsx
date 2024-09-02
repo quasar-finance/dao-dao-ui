@@ -30,12 +30,17 @@ import {
   GOVERNANCE_PROPOSAL_TYPE_CUSTOM,
   GenericToken,
   GenericTokenBalance,
+  GenericTokenBalanceWithOwner,
   GovProposalActionDisplayProps,
   GovernanceProposalActionData,
   LoadingData,
   StatefulTokenAmountDisplayProps,
 } from '@dao-dao/types'
 import { ActionComponent, ActionContextType } from '@dao-dao/types/actions'
+import { CommunityPoolSpendProposal } from '@dao-dao/types/protobuf/codegen/cosmos/distribution/v1beta1/distribution'
+import { Cosmos_govv1beta1Content_FromAmino } from '@dao-dao/types/protobuf/codegen/cosmos/gov/v1beta1/gov'
+import { ParameterChangeProposal } from '@dao-dao/types/protobuf/codegen/cosmos/params/v1beta1/params'
+import { SoftwareUpgradeProposal } from '@dao-dao/types/protobuf/codegen/cosmos/upgrade/v1beta1/upgrade'
 import {
   convertMicroDenomToDenomWithDecimals,
   getChainAssets,
@@ -45,10 +50,6 @@ import {
   validateJSON,
   validateRequired,
 } from '@dao-dao/utils'
-import { CommunityPoolSpendProposal } from '@dao-dao/utils/protobuf/codegen/cosmos/distribution/v1beta1/distribution'
-import { Cosmos_govv1beta1Content_FromAmino } from '@dao-dao/utils/protobuf/codegen/cosmos/gov/v1beta1/gov'
-import { ParameterChangeProposal } from '@dao-dao/utils/protobuf/codegen/cosmos/params/v1beta1/params'
-import { SoftwareUpgradeProposal } from '@dao-dao/utils/protobuf/codegen/cosmos/upgrade/v1beta1/upgrade'
 
 import { useActionOptions } from '../../../react'
 
@@ -59,6 +60,7 @@ export type GovernanceProposalOptions = {
       min: string
     })[]
   >
+  communityPoolBalances: LoadingData<GenericTokenBalanceWithOwner[]>
   TokenAmountDisplay: ComponentType<StatefulTokenAmountDisplayProps>
   AddressInput: ComponentType<AddressInputProps<GovernanceProposalActionData>>
   GovProposalActionDisplay: ComponentType<GovProposalActionDisplayProps>
@@ -75,6 +77,7 @@ export const GovernanceProposalComponent: ActionComponent<
     options: {
       supportsV1GovProposals,
       minDeposits,
+      communityPoolBalances,
       GovProposalActionDisplay,
       TokenAmountDisplay,
       AddressInput,
@@ -128,15 +131,23 @@ export const GovernanceProposalComponent: ActionComponent<
     name: (fieldNamePrefix + 'legacy.spends') as 'legacy.spends',
   })
 
-  const availableTokens: GenericToken[] = [
-    // First native.
-    ...(nativeToken ? [nativeToken] : []),
-    // Then the chain assets.
-    ...getChainAssets(chainId).filter(
-      ({ denomOrAddress }) =>
-        !nativeToken || denomOrAddress !== nativeToken.denomOrAddress
-    ),
-  ]
+  const availableTokens: GenericToken[] = Object.values(
+    Object.fromEntries(
+      [
+        // First native.
+        ...(nativeToken ? [nativeToken] : []),
+        // Then community pool tokens.
+        ...(!communityPoolBalances.loading
+          ? communityPoolBalances.data.map(({ token }) => token)
+          : []),
+        // Then the chain assets.
+        ...getChainAssets(chainId).filter(
+          ({ denomOrAddress }) =>
+            !nativeToken || denomOrAddress !== nativeToken.denomOrAddress
+        ),
+      ].map((token) => [token.denomOrAddress, token])
+    )
+  )
 
   // When any legacy fields change, encode and store it.
   const legacy = watch((fieldNamePrefix + 'legacy') as 'legacy')
@@ -278,6 +289,33 @@ export const GovernanceProposalComponent: ActionComponent<
                 <InputErrorMessage error={errors?.description} />
               </div>
             </div>
+
+            {supportsV1GovProposals && (
+              <div
+                className={clsx(
+                  'flex flex-col gap-2 py-4 px-6 sm:flex-row sm:items-center sm:justify-between sm:gap-6',
+                  onGovernancePage
+                    ? 'border-b border-border-secondary py-5 px-6'
+                    : 'rounded-md bg-background-tertiary p-4'
+                )}
+              >
+                <InputLabel
+                  name={t('title.metadata')}
+                  optional
+                  primary={onGovernancePage}
+                />
+
+                <div className="flex grow flex-col">
+                  <TextInput
+                    disabled={!isCreating}
+                    error={errors?.metadata}
+                    fieldName={(fieldNamePrefix + 'metadata') as 'metadata'}
+                    register={register}
+                  />
+                  <InputErrorMessage error={errors?.metadata} />
+                </div>
+              </div>
+            )}
 
             {
               // Support expedited field on Osmosis.

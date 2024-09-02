@@ -25,7 +25,6 @@ import {
   DaoVotingNativeStakedHooks,
   useAwaitNextBlock,
   useWallet,
-  useWalletInfo,
 } from '../../../../hooks'
 import { ProfileCardMemberInfoTokens } from '../../../components'
 import { useVotingModuleAdapterOptions } from '../../../react/context'
@@ -39,10 +38,11 @@ export const ProfileCardMemberInfo = ({
   const { t } = useTranslation()
   const { name: daoName } = useDaoInfoContext()
   const { chainId, votingModuleAddress } = useVotingModuleAdapterOptions()
-  const { address: walletAddress, isWalletConnected } = useWallet({
-    chainId,
-  })
-  const { refreshBalances } = useWalletInfo({
+  const {
+    address: walletAddress,
+    isWalletConnected,
+    refreshBalances,
+  } = useWallet({
     chainId,
   })
 
@@ -50,12 +50,10 @@ export const ProfileCardMemberInfo = ({
   const [claimingLoading, setClaimingLoading] = useState(false)
   const stakingLoading = useRecoilValue(stakingLoadingAtom)
 
-  const {
-    token: governanceToken,
-    loadingWalletBalance: loadingUnstakedBalance,
-  } = useGovernanceTokenInfo({
-    fetchWalletBalance: true,
-  })
+  const { governanceToken, loadingWalletBalance: loadingUnstakedBalance } =
+    useGovernanceTokenInfo({
+      fetchWalletBalance: true,
+    })
 
   const {
     unstakingDuration,

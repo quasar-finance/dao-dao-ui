@@ -1,11 +1,12 @@
 import { coin, coins } from '@cosmjs/amino'
-import { useCallback, useEffect, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { ComponentType, useCallback, useEffect, useState } from 'react'
 import { useFormContext } from 'react-hook-form'
 import { constSelector, useRecoilValue } from 'recoil'
 
+import { tokenQueries } from '@dao-dao/state/query'
 import {
   accountsSelector,
-  genericTokenSelector,
   neutronIbcTransferFeeSelector,
   nobleTariffTransferFeeSelector,
   skipAllChainsPfmEnabledSelector,
@@ -20,23 +21,27 @@ import {
 import {
   AccountType,
   ChainId,
-  CosmosMsgForEmpty,
   DurationUnits,
   Entity,
   GenericTokenBalanceWithOwner,
   LoadingData,
   LoadingDataWithError,
   TokenType,
+  UnifiedCosmosMsg,
   UseDecodedCosmosMsg,
 } from '@dao-dao/types'
 import {
-  ActionComponent,
+  ActionComponentProps,
   ActionContextType,
   ActionKey,
   ActionMaker,
   UseDefaults,
   UseTransformToCosmos,
 } from '@dao-dao/types/actions'
+import { makeStargateMessage } from '@dao-dao/types/protobuf'
+import { MsgCommunityPoolSpend } from '@dao-dao/types/protobuf/codegen/cosmos/distribution/v1beta1/tx'
+import { MsgTransfer } from '@dao-dao/types/protobuf/codegen/ibc/applications/transfer/v1/tx'
+import { MsgTransfer as NeutronMsgTransfer } from '@dao-dao/types/protobuf/codegen/neutron/transfer/v1/tx'
 import {
   MAINNET,
   convertDenomToMicroDenomStringWithDecimals,
@@ -55,8 +60,8 @@ import {
   isDecodedStargateMsg,
   isValidBech32Address,
   makeBankMessage,
-  makeStargateMessage,
   makeWasmMessage,
+  maybeGetChainForChainId,
   maybeGetNativeTokenForChainId,
   maybeMakeIcaExecuteMessage,
   maybeMakePolytoneExecuteMessage,
@@ -64,14 +69,12 @@ import {
   parseValidPfmMemo,
   transformBech32Address,
 } from '@dao-dao/utils'
-import { MsgCommunityPoolSpend } from '@dao-dao/utils/protobuf/codegen/cosmos/distribution/v1beta1/tx'
-import { MsgTransfer } from '@dao-dao/utils/protobuf/codegen/ibc/applications/transfer/v1/tx'
-import { MsgTransfer as NeutronMsgTransfer } from '@dao-dao/utils/protobuf/codegen/neutron/transfer/v1/tx'
 
 import { AddressInput } from '../../../../components'
+import { useQueryLoadingDataWithError } from '../../../../hooks'
 import { useWallet } from '../../../../hooks/useWallet'
 import { useProposalModuleAdapterCommonContextIfAvailable } from '../../../../proposal-module-adapter/react/context'
-import { entitySelector } from '../../../../recoil'
+import { entityQueries } from '../../../../queries/entity'
 import { useTokenBalances } from '../../../hooks/useTokenBalances'
 import { useActionOptions } from '../../../react'
 import {
@@ -87,10 +90,13 @@ const useDefaults: UseDefaults<SpendData> = () => {
   } = useActionOptions()
   const { address: walletAddress = '' } = useWallet()
 
-  // Should always be defined if in a DAO.
+  // Should always be defined if in a DAO proposal. Even for a DAO, it may not
+  // be defined if being authz executed or something similar.
   const maxVotingPeriodSelector =
     useProposalModuleAdapterCommonContextIfAvailable()?.common?.selectors
-      ?.maxVotingPeriod
+      ?.maxVotingPeriod ||
+    // If no selector, default to 0 time (likely in authz context).
+    constSelector({ time: 0 })
   const proposalModuleMaxVotingPeriod = useCachedLoadingWithError(
     context.type === ActionContextType.Dao
       ? maxVotingPeriodSelector
@@ -117,13 +123,17 @@ const useDefaults: UseDefaults<SpendData> = () => {
     return proposalModuleMaxVotingPeriod.error
   }
 
+  const nativeToken = maybeGetNativeTokenForChainId(chainId)
+
   return {
     fromChainId: chainId,
     toChainId: chainId,
     from: address,
     to: walletAddress,
     amount: 1,
-    denom: maybeGetNativeTokenForChainId(chainId)?.denomOrAddress || '',
+    denom: nativeToken?.denomOrAddress || '',
+    decimals: nativeToken?.decimals || 0,
+    cw20: nativeToken?.type === TokenType.Cw20,
     ibcTimeout:
       'time' in proposalModuleMaxVotingPeriod.data
         ? // 1 week if voting period is a time since we can append it after.
@@ -139,13 +149,27 @@ const useDefaults: UseDefaults<SpendData> = () => {
   }
 }
 
-const Component: ActionComponent<undefined, SpendData> = (props) => {
+export const StatefulSpendComponent: ComponentType<
+  ActionComponentProps<undefined, SpendData> & {
+    /**
+     * Disallow changing the destination chain and address. This is useful if
+     * the Spend component is being wrapped by another component.
+     */
+    noChangeDestination?: boolean
+    /**
+     * Whether or not to restrict the token options to Valence accounts.
+     * Defaults to false.
+     */
+    fromValence?: boolean
+  }
+> = (props) => {
   const {
     context,
     address,
     chain: { chain_id: currentChainId },
   } = useActionOptions()
-  const { watch, setValue } = useFormContext<SpendData>()
+  const { watch, setValue, getValues } = useFormContext<SpendData>()
+  const queryClient = useQueryClient()
 
   const fromChainId = watch(
     (props.fieldNamePrefix + 'fromChainId') as 'fromChainId'
@@ -155,6 +179,7 @@ const Component: ActionComponent<undefined, SpendData> = (props) => {
   const recipient = watch((props.fieldNamePrefix + 'to') as 'to')
   const toChainId = watch((props.fieldNamePrefix + 'toChainId') as 'toChainId')
   const amount = watch((props.fieldNamePrefix + 'amount') as 'amount')
+  const isCw20 = watch((props.fieldNamePrefix + 'cw20') as 'cw20')
   const useDirectIbcPath = watch(
     (props.fieldNamePrefix + 'useDirectIbcPath') as 'useDirectIbcPath'
   )
@@ -181,22 +206,72 @@ const Component: ActionComponent<undefined, SpendData> = (props) => {
       : [
           {
             chainId: fromChainId,
-            // Cw20 denoms are contract addresses, native denoms are not.
-            type: isValidBech32Address(
-              denom,
-              getChainForChainId(fromChainId).bech32_prefix
-            )
-              ? TokenType.Cw20
-              : TokenType.Native,
+            type: isCw20 ? TokenType.Cw20 : TokenType.Native,
             denomOrAddress: denom,
           },
         ],
+    includeAccountTypes: props.fromValence ? [AccountType.Valence] : undefined,
+    excludeAccountTypes: props.fromValence ? [] : undefined,
   })
 
-  // Should always be defined if in a DAO.
+  // Load selected token and ensure fields are up to date when creating in case
+  // using custom token input.
+  const loadingToken = useQueryLoadingDataWithError(
+    fromChainId && denom
+      ? tokenQueries.info(queryClient, {
+          chainId: fromChainId,
+          denomOrAddress: denom,
+          // isCw20 not immediately updated for custom tokens.
+          type: (
+            props.isCreating
+              ? isValidBech32Address(
+                  denom,
+                  maybeGetChainForChainId(fromChainId)?.bech32_prefix
+                )
+              : isCw20
+          )
+            ? TokenType.Cw20
+            : TokenType.Native,
+        })
+      : undefined
+  )
+  useEffect(() => {
+    if (!props.isCreating || loadingToken.loading || loadingToken.errored) {
+      return
+    }
+
+    const decimals = getValues(
+      (props.fieldNamePrefix + 'decimals') as 'decimals'
+    )
+    const isCw20 = getValues((props.fieldNamePrefix + 'cw20') as 'cw20')
+
+    if (decimals !== loadingToken.data.decimals) {
+      setValue(
+        (props.fieldNamePrefix + 'decimals') as 'decimals',
+        loadingToken.data.decimals
+      )
+    }
+    if (isCw20 !== (loadingToken.data.type === TokenType.Cw20)) {
+      setValue(
+        (props.fieldNamePrefix + 'cw20') as 'cw20',
+        loadingToken.data.type === TokenType.Cw20
+      )
+    }
+  }, [
+    getValues,
+    loadingToken,
+    props.fieldNamePrefix,
+    props.isCreating,
+    setValue,
+  ])
+
+  // Should always be defined if in a DAO proposal. Even for a DAO, it may not
+  // be defined if being authz executed or something similar.
   const maxVotingPeriodSelector =
     useProposalModuleAdapterCommonContextIfAvailable()?.common?.selectors
-      ?.maxVotingPeriod
+      ?.maxVotingPeriod ||
+    // If no selector, default to 0 time (likely in authz context).
+    constSelector({ time: 0 })
   const proposalModuleMaxVotingPeriod = useRecoilValue(
     context.type === ActionContextType.Dao
       ? maxVotingPeriodSelector || constSelector(undefined)
@@ -217,41 +292,20 @@ const Component: ActionComponent<undefined, SpendData> = (props) => {
       : constSelector(undefined)
   )
 
-  // Once already created, load selected token info (which should already be
-  // loaded in the decoder), so this data is available right away. This removes
-  // the need to wait for all the token balances to load just to show the
-  // selected token.
-  const loadingSelectedToken = useCachedLoading(
-    props.isCreating
-      ? undefined
-      : genericTokenSelector({
-          chainId: fromChainId,
-          // Cw20 denoms are contract addresses, native denoms are not.
-          type: isValidBech32Address(
-            denom,
-            getChainForChainId(fromChainId).bech32_prefix
-          )
-            ? TokenType.Cw20
-            : TokenType.Native,
-          denomOrAddress: denom,
-        }),
-    undefined
-  )
-
   // If creating, use all token balances since they need to choose among them,
   // but once already created, we only need to load the selected token.
   const loadingTokens: LoadingData<GenericTokenBalanceWithOwner[]> =
     props.isCreating
       ? loadingAllTokenBalances
-      : loadingSelectedToken.loading
-      ? loadingSelectedToken
+      : loadingToken.loading
+      ? loadingToken
       : {
           loading: false,
-          updating: loadingSelectedToken.updating,
-          data: loadingSelectedToken.data
+          updating: loadingToken.updating,
+          data: !loadingToken.errored
             ? [
                 {
-                  token: loadingSelectedToken.data,
+                  token: loadingToken.data,
                   // Not used once already created.
                   balance: '0',
                   // Only address is checked so the specific account type is not
@@ -298,13 +352,13 @@ const Component: ActionComponent<undefined, SpendData> = (props) => {
     skipRoute.loading ||
       skipRoute.errored ||
       // Cannot use skip route if more than one TX is required.
-      skipRoute.data.txsRequired > 1
+      skipRoute.data.txs_required > 1
       ? undefined
       : accountsSelector({
           chainId: currentChainId,
           address,
           // Only need ICA for intermediate accounts.
-          includeIcaChains: skipRoute.data.chainIDs.slice(1, -1),
+          includeIcaChains: skipRoute.data.chain_ids.slice(1, -1),
         })
   )
   // Get account for each skip route chain.
@@ -312,18 +366,19 @@ const Component: ActionComponent<undefined, SpendData> = (props) => {
     skipRoute.loading ||
     skipRoute.errored ||
     // Cannot use skip route if more than one TX is required.
-    skipRoute.data.txsRequired > 1 ||
+    skipRoute.data.txs_required > 1 ||
     accounts.loading ||
     accounts.errored
       ? undefined
-      : skipRoute.data.chainIDs.slice(0, -1).map((chainId, index) =>
+      : skipRoute.data.chain_ids.slice(0, -1).map((chainId, index) =>
           // For source, use from address. This should always match the first
           // chain ID.
           index === 0
             ? from
-            : // Transform bech32 wallet address to chain.
+            : // Use profile address if set, falling back to transforming the address (which is unreliable due to different chains using different HD paths).
             context.type === ActionContextType.Wallet
-            ? transformBech32Address(address, chainId)
+            ? context.profile?.chains[chainId]?.address ||
+              transformBech32Address(address, chainId)
             : // Otherwise try to find an account (DAOs and gov).
               getAccountAddress({
                 accounts: accounts.data,
@@ -340,7 +395,7 @@ const Component: ActionComponent<undefined, SpendData> = (props) => {
     !routeAddresses || skipRoute.loading || skipRoute.errored
       ? undefined
       : routeAddresses.flatMap((address, index) =>
-          address ? [] : [skipRoute.data.chainIDs[index]]
+          address ? [] : [skipRoute.data.chain_ids[index]]
         )
 
   // Load Skip route message if IBC transfer.
@@ -352,7 +407,7 @@ const Component: ActionComponent<undefined, SpendData> = (props) => {
       !skipRoute.loading &&
       !skipRoute.errored &&
       // Can only use skip route if only one TX is required.
-      skipRoute.data.txsRequired === 1 &&
+      skipRoute.data.txs_required === 1 &&
       routeAddresses &&
       missingAccountChainIds &&
       missingAccountChainIds.length === 0 &&
@@ -361,7 +416,7 @@ const Component: ActionComponent<undefined, SpendData> = (props) => {
           chainAddresses: routeAddresses.reduce(
             (acc, address, index) => ({
               ...acc,
-              [skipRoute.data.chainIDs[index]]: address,
+              [skipRoute.data.chain_ids[index]]: address,
             }),
             {} as Record<string, string | undefined>
           ),
@@ -386,7 +441,7 @@ const Component: ActionComponent<undefined, SpendData> = (props) => {
         !skipRoute.loading &&
         !skipRoute.errored &&
         // Can only use skip route if only one TX is required.
-        skipRoute.data.txsRequired === 1 &&
+        skipRoute.data.txs_required === 1 &&
         // Only use skip IBC path if loads message successfully.
         !skipRouteMessageLoading.loading &&
         !skipRouteMessageLoading.errored
@@ -394,7 +449,7 @@ const Component: ActionComponent<undefined, SpendData> = (props) => {
           loading: false,
           errored: false,
           updating: skipRoute.updating,
-          data: skipRoute.data.chainIDs,
+          data: skipRoute.data.chain_ids,
         }
       : !props.isCreating && pfmChainPath?.length
       ? {
@@ -432,7 +487,7 @@ const Component: ActionComponent<undefined, SpendData> = (props) => {
           errored: false,
           updating: skipRoute.updating,
           data: convertMicroDenomToDenomWithDecimals(
-            skipRoute.data.amountOut,
+            skipRoute.data.amount_out,
             selectedToken.token.decimals
           ),
         }
@@ -496,13 +551,16 @@ const Component: ActionComponent<undefined, SpendData> = (props) => {
   ])
 
   const [currentEntity, setCurrentEntity] = useState<Entity | undefined>()
-  const loadingEntity = useCachedLoadingWithError(
-    validRecipient
-      ? entitySelector({
-          address: recipient,
-          chainId: toChainId,
-        })
-      : undefined
+  const loadingEntity = useQueryLoadingDataWithError(
+    entityQueries.info(
+      queryClient,
+      validRecipient
+        ? {
+            address: recipient,
+            chainId: toChainId,
+          }
+        : undefined
+    )
   )
   // Cache last successfully loaded entity.
   useEffect(() => {
@@ -518,6 +576,7 @@ const Component: ActionComponent<undefined, SpendData> = (props) => {
       {...props}
       options={{
         tokens: loadingTokens,
+        token: loadingToken,
         currentEntity,
         ibcPath,
         ibcAmountOut,
@@ -527,9 +586,9 @@ const Component: ActionComponent<undefined, SpendData> = (props) => {
             : {
                 loading: false,
                 data:
-                  skipRoute.data.txsRequired === 1
+                  skipRoute.data.txs_required === 1
                     ? undefined
-                    : skipRoute.data.chainIDs,
+                    : skipRoute.data.chain_ids,
               },
         missingAccountChainIds,
         nobleTariff,
@@ -546,237 +605,9 @@ const Component: ActionComponent<undefined, SpendData> = (props) => {
           !!proposalModuleMaxVotingPeriod &&
           'blocks' in proposalModuleMaxVotingPeriod,
         AddressInput,
+        noChangeDestination: props.noChangeDestination,
       }}
     />
-  )
-}
-
-const useTransformToCosmos: UseTransformToCosmos<SpendData> = () => {
-  const options = useActionOptions()
-
-  const loadingTokenBalances = useTokenBalances()
-
-  const neutronTransferFee = useCachedLoading(
-    neutronIbcTransferFeeSelector,
-    undefined
-  )
-
-  // Should always be defined if in a DAO.
-  const maxVotingPeriodSelector =
-    useProposalModuleAdapterCommonContextIfAvailable()?.common?.selectors
-      ?.maxVotingPeriod
-  const proposalModuleMaxVotingPeriod = useCachedLoadingWithError(
-    options.context.type === ActionContextType.Dao
-      ? maxVotingPeriodSelector
-      : options.context.type === ActionContextType.Wallet
-      ? // Wallets execute transactions right away, so there's no voting delay.
-        constSelector({
-          time: 0,
-        })
-      : options.context.type === ActionContextType.Gov
-      ? constSelector({
-          // Seconds
-          time: options.context.params.votingPeriod
-            ? Number(options.context.params.votingPeriod.seconds) +
-              options.context.params.votingPeriod.nanos / 1e9
-            : // If no voting period loaded, default to 30 days.
-              30 * 24 * 60 * 60,
-        })
-      : undefined
-  )
-
-  return useCallback(
-    ({
-      fromChainId,
-      toChainId,
-      from,
-      to,
-      amount: _amount,
-      denom,
-      ibcTimeout,
-      useDirectIbcPath,
-      _skipIbcTransferMsg,
-    }: SpendData) => {
-      if (loadingTokenBalances.loading) {
-        return
-      }
-
-      const { token, owner } =
-        loadingTokenBalances.data.find(
-          ({ owner, token }) =>
-            owner.address === from &&
-            token.chainId === fromChainId &&
-            token.denomOrAddress === denom
-        ) || {}
-      if (!token || !owner) {
-        throw new Error(`Unknown token: ${denom}`)
-      }
-
-      const amount = convertDenomToMicroDenomStringWithDecimals(
-        _amount,
-        token.decimals
-      )
-
-      // Gov module community pool spend.
-      if (options.context.type === ActionContextType.Gov) {
-        return makeStargateMessage({
-          stargate: {
-            typeUrl: MsgCommunityPoolSpend.typeUrl,
-            value: {
-              authority: options.address,
-              recipient: to,
-              amount: coins(amount, denom),
-            } as MsgCommunityPoolSpend,
-          },
-        })
-      }
-
-      let msg: CosmosMsgForEmpty | undefined
-      // IBC transfer.
-      if (token.type === TokenType.Native && toChainId !== fromChainId) {
-        // Require that this loads before using IBC.
-        if (
-          proposalModuleMaxVotingPeriod.loading ||
-          proposalModuleMaxVotingPeriod.errored
-        ) {
-          throw new Error('Failed to load proposal module max voting period')
-        }
-
-        // Default to conservative 30 days if no IBC timeout is set for some
-        // reason. This should never happen.
-        const timeoutSeconds = ibcTimeout
-          ? convertDurationWithUnitsToSeconds(ibcTimeout)
-          : 30 * 24 * 60 * 60
-        // Convert seconds to nanoseconds.
-        const timeoutTimestamp = BigInt(
-          Date.now() * 1e6 +
-            // Add timeout to voting period if it's a time duration.
-            ((!('time' in proposalModuleMaxVotingPeriod.data)
-              ? 0
-              : proposalModuleMaxVotingPeriod.data.time) +
-              timeoutSeconds) *
-              1e9
-        )
-
-        // If no Skip IBC msg or it errored or disabled, use single-hop IBC
-        // transfer.
-        if (
-          useDirectIbcPath ||
-          !_skipIbcTransferMsg ||
-          _skipIbcTransferMsg.loading ||
-          _skipIbcTransferMsg.errored
-        ) {
-          const { sourceChannel } = getIbcTransferInfoBetweenChains(
-            fromChainId,
-            toChainId
-          )
-          msg = makeStargateMessage({
-            stargate: {
-              typeUrl:
-                fromChainId === ChainId.NeutronMainnet
-                  ? NeutronMsgTransfer.typeUrl
-                  : MsgTransfer.typeUrl,
-              value: {
-                sourcePort: 'transfer',
-                sourceChannel,
-                token: coin(amount, denom),
-                sender: from,
-                receiver: to,
-                timeoutTimestamp,
-                memo: '',
-                // Add Neutron IBC transfer fee if sending from Neutron.
-                ...(fromChainId === ChainId.NeutronMainnet && {
-                  fee: neutronTransferFee.loading
-                    ? undefined
-                    : neutronTransferFee.data?.fee,
-                }),
-              } as NeutronMsgTransfer,
-            },
-          })
-        } else {
-          if (
-            _skipIbcTransferMsg.data.msgTypeURL !== MsgTransfer.typeUrl &&
-            _skipIbcTransferMsg.data.msgTypeURL !== NeutronMsgTransfer.typeUrl
-          ) {
-            throw new Error(
-              `Unexpected Skip transfer message type: ${_skipIbcTransferMsg.data.msgTypeURL}`
-            )
-          }
-
-          const skipTransferMsgValue = JSON.parse(_skipIbcTransferMsg.data.msg)
-          msg = makeStargateMessage({
-            stargate: {
-              typeUrl:
-                fromChainId === ChainId.NeutronMainnet
-                  ? NeutronMsgTransfer.typeUrl
-                  : MsgTransfer.typeUrl,
-              value: {
-                ...(fromChainId === ChainId.NeutronMainnet
-                  ? NeutronMsgTransfer
-                  : MsgTransfer
-                ).fromAmino({
-                  ...skipTransferMsgValue,
-                  // If no memo, use empty string. This will be undefined if PFM
-                  // is not used and it's only a single hop.
-                  memo: skipTransferMsgValue.memo || '',
-                  timeout_timestamp: timeoutTimestamp,
-                  timeout_height: undefined,
-                }),
-                // Add Neutron IBC transfer fee if sending from Neutron.
-                ...(fromChainId === ChainId.NeutronMainnet && {
-                  fee: neutronTransferFee.loading
-                    ? undefined
-                    : neutronTransferFee.data?.fee,
-                }),
-              },
-            },
-          })
-        }
-      } else if (token.type === TokenType.Native) {
-        msg = {
-          bank: makeBankMessage(amount, to, denom),
-        }
-      } else if (token.type === TokenType.Cw20) {
-        msg = makeWasmMessage({
-          wasm: {
-            execute: {
-              contract_addr: denom,
-              funds: [],
-              msg: {
-                transfer: {
-                  recipient: to,
-                  amount,
-                },
-              },
-            },
-          },
-        })
-      }
-
-      if (!msg) {
-        throw new Error(`Unknown token type: ${token.type}`)
-      }
-
-      return owner.type === AccountType.Ica
-        ? maybeMakeIcaExecuteMessage(
-            options.chain.chain_id,
-            fromChainId,
-            options.address,
-            owner.address,
-            msg
-          )
-        : maybeMakePolytoneExecuteMessage(
-            options.chain.chain_id,
-            fromChainId,
-            msg
-          )
-    },
-    [
-      loadingTokenBalances,
-      options,
-      neutronTransferFee,
-      proposalModuleMaxVotingPeriod,
-    ]
   )
 }
 
@@ -785,6 +616,7 @@ const useDecodedCosmosMsg: UseDecodedCosmosMsg<SpendData> = (
 ) => {
   const options = useActionOptions()
   const defaults = useDefaults()
+  const queryClient = useQueryClient()
 
   let chainId = options.chain.chain_id
   let from = options.address
@@ -845,9 +677,9 @@ const useDecodedCosmosMsg: UseDecodedCosmosMsg<SpendData> = (
     }) &&
     msg.stargate.value.sourcePort === 'transfer'
 
-  const token = useCachedLoadingWithError(
+  const token = useQueryLoadingDataWithError(
     isNative || isCw20 || isIbcTransfer
-      ? genericTokenSelector({
+      ? tokenQueries.info(queryClient, {
           chainId,
           type: isNative || isIbcTransfer ? TokenType.Native : TokenType.Cw20,
           denomOrAddress: isIbcTransfer
@@ -923,6 +755,9 @@ const useDecodedCosmosMsg: UseDecodedCosmosMsg<SpendData> = (
           token.data.decimals
         ),
         denom: token.data.denomOrAddress,
+        decimals: token.data.decimals,
+        // Should always be false.
+        cw20: token.data.type === TokenType.Cw20,
 
         // Nanoseconds to milliseconds.
         _absoluteIbcTimeout: Number(
@@ -950,6 +785,8 @@ const useDecodedCosmosMsg: UseDecodedCosmosMsg<SpendData> = (
           token.data.decimals
         ),
         denom: token.data.denomOrAddress,
+        decimals: token.data.decimals,
+        cw20: false,
       },
     }
   } else if (token.data.type === TokenType.Cw20) {
@@ -967,6 +804,8 @@ const useDecodedCosmosMsg: UseDecodedCosmosMsg<SpendData> = (
           token.data.decimals
         ),
         denom: msg.wasm.execute.contract_addr,
+        decimals: token.data.decimals,
+        cw20: true,
       },
     }
   }
@@ -974,15 +813,257 @@ const useDecodedCosmosMsg: UseDecodedCosmosMsg<SpendData> = (
   return { match: false }
 }
 
-export const makeSpendAction: ActionMaker<SpendData> = ({ t, context }) => ({
-  key: ActionKey.Spend,
-  Icon: MoneyEmoji,
-  label: t('title.spend'),
-  description: t('info.spendActionDescription', {
-    context: context.type,
-  }),
-  Component,
-  useDefaults,
-  useTransformToCosmos,
-  useDecodedCosmosMsg,
-})
+export const makeSpendAction: ActionMaker<
+  SpendData,
+  {
+    /**
+     * Whether or not to restrict the token options to Valence accounts.
+     * Defaults to false.
+     */
+    fromValence?: boolean
+  }
+> = ({ t, context }) => {
+  const useTransformToCosmos: UseTransformToCosmos<SpendData> = () => {
+    const options = useActionOptions()
+
+    const neutronTransferFee = useCachedLoading(
+      neutronIbcTransferFeeSelector,
+      undefined
+    )
+
+    // Should always be defined if in a DAO proposal. Even for a DAO, it may not
+    // be defined if being authz executed or something similar.
+    const maxVotingPeriodSelector =
+      useProposalModuleAdapterCommonContextIfAvailable()?.common?.selectors
+        ?.maxVotingPeriod ||
+      // If no selector, default to 0 time (likely in authz context).
+      constSelector({ time: 0 })
+    const proposalModuleMaxVotingPeriod = useCachedLoadingWithError(
+      options.context.type === ActionContextType.Dao
+        ? maxVotingPeriodSelector
+        : options.context.type === ActionContextType.Wallet
+        ? // Wallets execute transactions right away, so there's no voting delay.
+          constSelector({
+            time: 0,
+          })
+        : options.context.type === ActionContextType.Gov
+        ? constSelector({
+            // Seconds
+            time: options.context.params.votingPeriod
+              ? Number(options.context.params.votingPeriod.seconds) +
+                options.context.params.votingPeriod.nanos / 1e9
+              : // If no voting period loaded, default to 30 days.
+                30 * 24 * 60 * 60,
+          })
+        : undefined
+    )
+
+    return useCallback(
+      ({
+        fromChainId,
+        toChainId,
+        from,
+        to,
+        amount: _amount,
+        denom,
+        decimals,
+        cw20,
+        ibcTimeout,
+        useDirectIbcPath,
+        _skipIbcTransferMsg,
+      }: SpendData) => {
+        const amount = convertDenomToMicroDenomStringWithDecimals(
+          _amount,
+          decimals
+        )
+
+        const spendAccount = context.accounts.find(
+          (a) => a.chainId === fromChainId && a.address === from
+        )
+        // Should never happen.
+        if (!spendAccount) {
+          throw new Error(t('error.failedToFindSpendingAccount'))
+        }
+
+        // Gov module community pool spend.
+        if (options.context.type === ActionContextType.Gov) {
+          return makeStargateMessage({
+            stargate: {
+              typeUrl: MsgCommunityPoolSpend.typeUrl,
+              value: {
+                authority: options.address,
+                recipient: to,
+                amount: coins(amount, denom),
+              } as MsgCommunityPoolSpend,
+            },
+          })
+        }
+
+        let msg: UnifiedCosmosMsg | undefined
+        // IBC transfer of native token.
+        if (!cw20 && toChainId !== fromChainId) {
+          // Require that this loads before using IBC.
+          if (
+            proposalModuleMaxVotingPeriod.loading ||
+            proposalModuleMaxVotingPeriod.errored
+          ) {
+            throw new Error('Failed to load proposal module max voting period')
+          }
+
+          // Default to conservative 30 days if no IBC timeout is set for some
+          // reason. This should never happen.
+          const timeoutSeconds = ibcTimeout
+            ? convertDurationWithUnitsToSeconds(ibcTimeout)
+            : 30 * 24 * 60 * 60
+          // Convert seconds to nanoseconds.
+          const timeoutTimestamp = BigInt(
+            Date.now() * 1e6 +
+              // Add timeout to voting period if it's a time duration.
+              ((!('time' in proposalModuleMaxVotingPeriod.data)
+                ? 0
+                : proposalModuleMaxVotingPeriod.data.time) +
+                timeoutSeconds) *
+                1e9
+          )
+
+          // If no Skip IBC msg or it errored or disabled, use single-hop IBC
+          // transfer.
+          if (
+            useDirectIbcPath ||
+            !_skipIbcTransferMsg ||
+            _skipIbcTransferMsg.loading ||
+            _skipIbcTransferMsg.errored
+          ) {
+            const { sourceChannel } = getIbcTransferInfoBetweenChains(
+              fromChainId,
+              toChainId
+            )
+            msg = makeStargateMessage({
+              stargate: {
+                typeUrl:
+                  fromChainId === ChainId.NeutronMainnet ||
+                  fromChainId === ChainId.NeutronTestnet
+                    ? NeutronMsgTransfer.typeUrl
+                    : MsgTransfer.typeUrl,
+                value: {
+                  sourcePort: 'transfer',
+                  sourceChannel,
+                  token: coin(amount, denom),
+                  sender: from,
+                  receiver: to,
+                  timeoutTimestamp,
+                  memo: '',
+                  // Add Neutron IBC transfer fee if sending from Neutron.
+                  ...((fromChainId === ChainId.NeutronMainnet ||
+                    fromChainId === ChainId.NeutronTestnet) && {
+                    fee: neutronTransferFee.loading
+                      ? undefined
+                      : neutronTransferFee.data?.fee,
+                  }),
+                } as NeutronMsgTransfer,
+              },
+            })
+          } else {
+            if (
+              _skipIbcTransferMsg.data.msg_type_url !== MsgTransfer.typeUrl &&
+              _skipIbcTransferMsg.data.msg_type_url !==
+                NeutronMsgTransfer.typeUrl
+            ) {
+              throw new Error(
+                `Unexpected Skip transfer message type: ${_skipIbcTransferMsg.data.msg_type_url}`
+              )
+            }
+
+            const skipTransferMsgValue = JSON.parse(
+              _skipIbcTransferMsg.data.msg
+            )
+            msg = makeStargateMessage({
+              stargate: {
+                typeUrl:
+                  fromChainId === ChainId.NeutronMainnet ||
+                  fromChainId === ChainId.NeutronTestnet
+                    ? NeutronMsgTransfer.typeUrl
+                    : MsgTransfer.typeUrl,
+                value: {
+                  ...(fromChainId === ChainId.NeutronMainnet ||
+                  fromChainId === ChainId.NeutronTestnet
+                    ? NeutronMsgTransfer
+                    : MsgTransfer
+                  ).fromAmino({
+                    ...skipTransferMsgValue,
+                    // Replace all forwarding timeouts with our own. If no memo,
+                    // use empty string. This will be undefined if PFM is not
+                    // used and it's only a single hop.
+                    memo:
+                      (typeof skipTransferMsgValue.memo === 'string' &&
+                        skipTransferMsgValue.memo.replace(
+                          /"timeout":\d+/g,
+                          `"timeout":${timeoutTimestamp.toString()}`
+                        )) ||
+                      '',
+                    timeout_timestamp: timeoutTimestamp,
+                    timeout_height: undefined,
+                  }),
+                  // Add Neutron IBC transfer fee if sending from Neutron.
+                  ...((fromChainId === ChainId.NeutronMainnet ||
+                    fromChainId === ChainId.NeutronTestnet) && {
+                    fee: neutronTransferFee.loading
+                      ? undefined
+                      : neutronTransferFee.data?.fee,
+                  }),
+                },
+              },
+            })
+          }
+        } else if (!cw20) {
+          msg = {
+            bank: makeBankMessage(amount, to, denom),
+          }
+        } else {
+          msg = makeWasmMessage({
+            wasm: {
+              execute: {
+                contract_addr: denom,
+                funds: [],
+                msg: {
+                  transfer: {
+                    recipient: to,
+                    amount,
+                  },
+                },
+              },
+            },
+          })
+        }
+
+        return spendAccount.type === AccountType.Ica
+          ? maybeMakeIcaExecuteMessage(
+              options.chain.chain_id,
+              fromChainId,
+              options.address,
+              spendAccount.address,
+              msg
+            )
+          : maybeMakePolytoneExecuteMessage(
+              options.chain.chain_id,
+              fromChainId,
+              msg
+            )
+      },
+      [options, neutronTransferFee, proposalModuleMaxVotingPeriod]
+    )
+  }
+
+  return {
+    key: ActionKey.Spend,
+    Icon: MoneyEmoji,
+    label: t('title.spend'),
+    description: t('info.spendActionDescription', {
+      context: context.type,
+    }),
+    Component: StatefulSpendComponent,
+    useDefaults,
+    useTransformToCosmos,
+    useDecodedCosmosMsg,
+  }
+}

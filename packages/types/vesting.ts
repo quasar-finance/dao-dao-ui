@@ -1,5 +1,5 @@
-import { GenericToken } from '@dao-dao/types'
-import { Vest } from '@dao-dao/types/contracts/CwVesting'
+import { Vest } from './contracts/CwVesting'
+import { GenericToken } from './token'
 
 export enum VestingContractVersion {
   /**
@@ -108,6 +108,7 @@ export type VestingInfo = {
           }
       ))
     | undefined
+    | null
   // Amount vested so far.
   vested: string
   // Amount available to distribute.
@@ -135,4 +136,39 @@ export type VestingStep = {
   timestamp: number
   // Total amount vested at this timestamp.
   amount: number
+}
+
+export type CwVestingStakeEvent = {
+  blockHeight: string
+  blockTimeUnixMs: string
+} & (
+  | {
+      type: 'delegate'
+      validator: string
+      amount: string
+    }
+  | {
+      type: 'undelegate'
+      validator: string
+      amount: string
+    }
+  | {
+      type: 'redelegate'
+      fromValidator: string
+      toValidator: string
+      amount: string
+    }
+)
+
+export type CwVestingSlashRegistration = {
+  validator: string
+  // Nanoseconds.
+  time: string
+  amount: string
+  duringUnbonding: boolean
+}
+
+export type CwVestingStakeHistory = {
+  stakeEvents: CwVestingStakeEvent[]
+  slashRegistrations: CwVestingSlashRegistration[]
 }

@@ -11,7 +11,7 @@ import { DefaultSeo } from 'next-seo'
 import type { AppProps } from 'next/app'
 import { useRouter } from 'next/router'
 import { useEffect, useState } from 'react'
-import { RecoilRoot, useRecoilState, useSetRecoilState } from 'recoil'
+import { useRecoilState, useSetRecoilState } from 'recoil'
 
 import {
   activeThemeAtom,
@@ -21,6 +21,7 @@ import {
 import {
   AppContextProvider,
   DappLayout,
+  StateProvider,
   WalletProvider,
 } from '@dao-dao/stateful'
 import {
@@ -80,6 +81,7 @@ const InnerApp = ({ Component, pageProps }: AppProps) => {
         // @ts-ignore
         'data-api': 'https://vis.daodao.zone/dao/event',
       }}
+      taggedEvents
       trackOutboundLinks
     >
       <ThemeProvider
@@ -167,9 +169,9 @@ const DApp = (props: AppProps) => (
       }}
     />
 
-    <RecoilRoot>
+    <StateProvider dehyratedState={props.pageProps.reactQueryDehydratedState}>
       <InnerApp {...props} />
-    </RecoilRoot>
+    </StateProvider>
   </>
 )
 

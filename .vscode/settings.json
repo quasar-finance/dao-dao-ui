@@ -33,6 +33,10 @@
     {
       "pattern": "packages/*",
       "!cwd": false
+    },
+    {
+      "pattern": "node_modules/*",
+      "!cwd": false
     }
   ],
   "eslint.validate": [
@@ -42,5 +46,11 @@
     "typescriptreact"
   ],
   "typescript.tsdk": "node_modules/typescript/lib",
-  "typescript.tsserver.experimental.enableProjectDiagnostics": true
+  "typescript.tsserver.experimental.enableProjectDiagnostics": true,
+  "todo-tree.filtering.excludeGlobs": [
+    "**/dist/**/*",
+    "**/.next/**/*",
+    "**/node_modules/*/**",
+    "**/packages/utils/protobuf/**/*"
+  ]
 }

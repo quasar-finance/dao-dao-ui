@@ -1,50 +1,40 @@
-import { useEffect } from 'react'
-import { useSetRecoilState, waitForAll } from 'recoil'
+import { useQueries, useQueryClient } from '@tanstack/react-query'
 
-import { refreshVestingAtom } from '@dao-dao/state/recoil'
 import {
-  useCachedLoadingWithError,
-  useChain,
-  useDaoInfoContext,
-  useDaoNavHelpers,
-} from '@dao-dao/stateless'
+  cwPayrollFactoryExtraQueries,
+  cwVestingExtraQueries,
+} from '@dao-dao/state/query'
+import { useDaoInfoContext, useDaoNavHelpers } from '@dao-dao/stateless'
 import {
   ActionKey,
   VestingPaymentsWidgetData,
   WidgetRendererProps,
 } from '@dao-dao/types'
-import { getDaoProposalSinglePrefill } from '@dao-dao/utils'
+import {
+  getDaoProposalSinglePrefill,
+  makeCombineQueryResultsIntoLoadingDataWithError,
+} from '@dao-dao/utils'
 
 import { useActionForKey } from '../../../../../actions'
 import {
   ButtonLink,
-  EntityDisplay,
   Trans,
   VestingPaymentCard,
+  VestingPaymentLine,
 } from '../../../../../components'
 import { useMembership } from '../../../../../hooks/useMembership'
-import { vestingInfosForFactorySelector } from '../../../../../recoil'
 import { TabRenderer as StatelessTabRenderer } from './TabRenderer'
 
 export const TabRenderer = ({
   variables: { factories, factory, oldFactories },
 }: WidgetRendererProps<VestingPaymentsWidgetData>) => {
-  const { chain_id: defaultChainId } = useChain()
-  const { coreAddress } = useDaoInfoContext()
+  const { chainId: defaultChainId, coreAddress } = useDaoInfoContext()
   const { getDaoProposalPath } = useDaoNavHelpers()
-  const { isMember = false } = useMembership({
-    coreAddress,
-  })
+  const { isMember = false } = useMembership()
 
-  const setRefresh = useSetRecoilState(refreshVestingAtom(''))
-  // Refresh vesting data every 30 seconds.
-  useEffect(() => {
-    const interval = setInterval(() => setRefresh((id) => id + 1), 30000)
-    return () => clearInterval(interval)
-  }, [setRefresh])
-
-  const vestingPaymentsLoading = useCachedLoadingWithError(
-    waitForAll([
+  const queryClient = useQueryClient()
+  const vestingContractsLoading = useQueries({
+    queries: [
       // Factory or factory list depending on version.
       ...(factories
         ? Object.entries(factories).map(([chainId, { address }]) => ({
@@ -61,41 +51,59 @@ export const TabRenderer = ({
         : // Should never happen.
           []
       ).map(({ chainId, address }) =>
-        vestingInfosForFactorySelector({
+        cwPayrollFactoryExtraQueries.listAllVestingContracts(queryClient, {
           chainId,
-          factory: address,
+          address,
         })
       ),
 
       // Old factories.
       ...(oldFactories || []).map(({ address }) =>
-        vestingInfosForFactorySelector({
+        cwPayrollFactoryExtraQueries.listAllVestingContracts(queryClient, {
           chainId: defaultChainId,
-          factory: address,
+          address,
         })
       ),
-    ]),
-    // Combine all vesting infos into one list across chains.
-    (data) => data.flat()
-  )
+    ],
+    combine: makeCombineQueryResultsIntoLoadingDataWithError({
+      firstLoad: 'one',
+    }),
+  })
+  // Fetch infos individually so they refresh when data is updated elsewhere.
+  const vestingInfosLoading = useQueries({
+    queries:
+      vestingContractsLoading.loading || vestingContractsLoading.errored
+        ? []
+        : vestingContractsLoading.data.flatMap(({ chainId, contracts }) =>
+            contracts.map(({ contract }) =>
+              cwVestingExtraQueries.info(queryClient, {
+                chainId,
+                address: contract,
+              })
+            )
+          ),
+    combine: makeCombineQueryResultsIntoLoadingDataWithError({
+      firstLoad: 'one',
+    }),
+  })
 
   const vestingAction = useActionForKey(ActionKey.ManageVesting)
   const vestingActionDefaults = vestingAction?.useDefaults()
 
   // Vesting payments that need a slash registered.
   const vestingPaymentsNeedingSlashRegistration =
-    vestingPaymentsLoading.loading || vestingPaymentsLoading.errored
+    vestingInfosLoading.loading || vestingInfosLoading.errored
       ? []
-      : vestingPaymentsLoading.data.filter(
+      : vestingInfosLoading.data.filter(
           ({ hasUnregisteredSlashes }) => hasUnregisteredSlashes
         )
 
   return (
     <StatelessTabRenderer
       ButtonLink={ButtonLink}
-      EntityDisplay={EntityDisplay}
       Trans={Trans}
       VestingPaymentCard={VestingPaymentCard}
+      VestingPaymentLine={VestingPaymentLine}
       createVestingPaymentHref={
         vestingAction
           ? getDaoProposalPath(coreAddress, 'create', {
@@ -135,7 +143,7 @@ export const TabRenderer = ({
                                 address: vestingContractAddress,
                                 validator: validatorOperatorAddress,
                                 // Milliseconds to nanoseconds.
-                                time: (slash.timeMs * 1e6).toString(),
+                                time: BigInt(slash.timeMs * 1e6).toString(),
                                 amount: slash.unregisteredAmount.toString(),
                                 duringUnbonding: slash.duringUnbonding,
                               },
@@ -147,7 +155,7 @@ export const TabRenderer = ({
             })
           : undefined
       }
-      vestingPaymentsLoading={vestingPaymentsLoading}
+      vestingPaymentsLoading={vestingInfosLoading}
     />
   )
 }

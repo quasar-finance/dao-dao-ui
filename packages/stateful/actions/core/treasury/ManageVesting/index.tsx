@@ -1,9 +1,14 @@
 import { coins } from '@cosmjs/amino'
+import { useQueries, useQueryClient } from '@tanstack/react-query'
 import { ComponentType, useCallback, useEffect } from 'react'
 import { useFormContext } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { constSelector, useRecoilValueLoadable, waitForAll } from 'recoil'
 
+import {
+  cwPayrollFactoryQueries,
+  cwVestingExtraQueries,
+} from '@dao-dao/state/query'
 import {
   Cw1WhitelistSelectors,
   genericTokenSelector,
@@ -14,17 +19,16 @@ import {
   MoneyWingsEmoji,
   SegmentedControls,
   useCachedLoadable,
-  useCachedLoading,
-  useCachedLoadingWithError,
 } from '@dao-dao/stateless'
 import {
-  CosmosMsgForEmpty,
   DurationUnits,
   DurationWithUnits,
   SegmentedControlsProps,
   TokenType,
   TypedOption,
+  UnifiedCosmosMsg,
   VestingContractVersion,
+  VestingInfo,
   VestingPaymentsWidgetData,
   WidgetId,
 } from '@dao-dao/types'
@@ -50,16 +54,17 @@ import {
   convertMicroDenomToDenomWithDecimals,
   convertSecondsToDurationWithUnits,
   decodeCw1WhitelistExecuteMsg,
+  decodeJsonFromBase64,
   decodePolytoneExecuteMsg,
-  encodeMessageAsBase64,
+  encodeJsonToBase64,
   getChainAddressForActionOptions,
   getDisplayNameForChainId,
   getNativeTokenForChainId,
   isValidBech32Address,
+  makeCombineQueryResultsIntoLoadingDataWithError,
   makeWasmMessage,
   maybeMakePolytoneExecuteMessage,
   objectMatchesStructure,
-  parseEncodedMessage,
 } from '@dao-dao/utils'
 
 import {
@@ -69,12 +74,11 @@ import {
   Trans,
   VestingPaymentCard,
 } from '../../../../components'
-import { useCreateCw1Whitelist } from '../../../../hooks'
 import {
-  vestingFactoryOwnerSelector,
-  vestingInfoSelector,
-  vestingInfosOwnedBySelector,
-} from '../../../../recoil/selectors/vesting'
+  useCreateCw1Whitelist,
+  useQueryLoadingData,
+  useQueryLoadingDataWithError,
+} from '../../../../hooks'
 import { useWidget } from '../../../../widgets'
 import { useTokenBalances } from '../../../hooks/useTokenBalances'
 import { useActionOptions } from '../../../react'
@@ -114,26 +118,28 @@ const useVestingInfosOwnedByEntity = () => {
     address: nativeAddress,
     chain: { chain_id: nativeChainId },
   } = useActionOptions()
+  const queryClient = useQueryClient()
 
-  return useCachedLoadingWithError(
-    waitForAll(
+  return useQueries({
+    queries:
       context.type === ActionContextType.Dao
         ? // Get vesting infos owned by any of the DAO's accounts.
-          context.info.accounts.map(({ chainId, address }) =>
-            vestingInfosOwnedBySelector({
+          context.dao.accounts.map(({ chainId, address }) =>
+            cwVestingExtraQueries.vestingInfosOwnedBy(queryClient, {
               address,
               chainId,
             })
           )
         : [
-            vestingInfosOwnedBySelector({
+            cwVestingExtraQueries.vestingInfosOwnedBy(queryClient, {
               address: nativeAddress,
               chainId: nativeChainId,
             }),
-          ]
-    ),
-    (data) => data.flat()
-  )
+          ],
+    combine: makeCombineQueryResultsIntoLoadingDataWithError({
+      transform: (infos) => infos.flat(),
+    }),
+  })
 }
 
 const Component: ComponentType<
@@ -180,28 +186,32 @@ const Component: ComponentType<
   const tokenBalances = useTokenBalances()
 
   // Only used on pre-v1 vesting widgets.
-  const preV1VestingFactoryOwner = useCachedLoadingWithError(
+  const queryClient = useQueryClient()
+  const preV1VestingFactoryOwner = useQueryLoadingDataWithError(
     widgetData && !widgetData.version && widgetData.factory
-      ? vestingFactoryOwnerSelector({
-          factory: widgetData.factory,
+      ? cwPayrollFactoryQueries.ownership(queryClient, {
           chainId: nativeChainId,
+          contractAddress: widgetData.factory,
         })
-      : undefined
+      : undefined,
+    ({ owner }) => owner || null
   )
 
   const vestingInfos = useVestingInfosOwnedByEntity()
 
-  const selectedVest = useCachedLoading(
+  const didSelectVest =
     !props.isCreating &&
-      (mode === 'registerSlash' || mode === 'cancel') &&
-      selectedAddress &&
-      selectedChainId
-      ? vestingInfoSelector({
-          vestingContractAddress: selectedAddress,
+    (mode === 'registerSlash' || mode === 'cancel') &&
+    !!selectedChainId &&
+    !!selectedAddress
+  const selectedVest = useQueryLoadingData(
+    didSelectVest
+      ? cwVestingExtraQueries.info(queryClient, {
           chainId: selectedChainId,
+          address: selectedAddress,
         })
-      : constSelector(undefined),
-    undefined
+      : undefined,
+    undefined as VestingInfo | undefined
   )
 
   // Prevent action from being submitted if no address is selected while we're
@@ -355,7 +365,12 @@ const Component: ComponentType<
           fieldNamePrefix={props.fieldNamePrefix + 'registerSlash.'}
           options={{
             vestingInfos,
-            selectedVest,
+            selectedVest: didSelectVest
+              ? selectedVest
+              : {
+                  loading: false,
+                  data: undefined,
+                },
             EntityDisplay,
             Trans,
           }}
@@ -367,7 +382,12 @@ const Component: ComponentType<
           fieldNamePrefix={props.fieldNamePrefix + 'cancel.'}
           options={{
             vestingInfos,
-            cancelledVestingContract: selectedVest,
+            cancelledVestingContract: didSelectVest
+              ? selectedVest
+              : {
+                  loading: false,
+                  data: undefined,
+                },
             EntityDisplay,
             VestingPaymentCard,
           }}
@@ -494,16 +514,18 @@ export const makeManageVestingAction: ActionMaker<ManageVestingData> = (
 
     return () => {
       const loadingTokenBalances = useTokenBalances()
+      const queryClient = useQueryClient()
 
       // Pre-v1 vesting widgets use the factory owner as the vesting owner.
-      const preV1VestingFactoryOwner = useCachedLoading(
-        widgetData?.factory && !widgetData.version
-          ? vestingFactoryOwnerSelector({
-              factory: widgetData.factory,
+      const preV1Vesting = !!widgetData?.factory && !widgetData.version
+      const preV1VestingFactoryOwner = useQueryLoadingDataWithError(
+        preV1Vesting
+          ? cwPayrollFactoryQueries.ownership(queryClient, {
               chainId: nativeChainId,
+              contractAddress: widgetData!.factory!,
             })
-          : constSelector(undefined),
-        undefined
+          : undefined,
+        ({ owner }) => owner || null
       )
 
       // Get the native unbonding duration for each chain that a vesting
@@ -526,13 +548,13 @@ export const makeManageVestingAction: ActionMaker<ManageVestingData> = (
       return useCallback(
         ({ mode, begin, registerSlash, cancel }: ManageVestingData) => {
           let chainId: string
-          let cosmosMsg: CosmosMsgForEmpty
+          let cosmosMsg: UnifiedCosmosMsg
 
           // Can only begin a vest if there is widget data available.
           if (mode === 'begin' && widgetData) {
             if (
               loadingTokenBalances.loading ||
-              preV1VestingFactoryOwner.loading ||
+              (preV1Vesting && preV1VestingFactoryOwner.loading) ||
               nativeUnstakingDurationSecondsLoadable.state !== 'hasValue'
             ) {
               return
@@ -589,8 +611,11 @@ export const makeManageVestingAction: ActionMaker<ManageVestingData> = (
               owner:
                 // Widgets prior to V1 use the factory owner.
                 !vestingSource.version
-                  ? // Default to empty string if undefined so that it errors. This should never error.
-                    preV1VestingFactoryOwner.data || ''
+                  ? // Default to empty string just in case. This should never be loading here or errored.
+                    (!preV1VestingFactoryOwner.loading &&
+                      !preV1VestingFactoryOwner.errored &&
+                      preV1VestingFactoryOwner.data) ||
+                    ''
                   : // V1 and later can set the owner, or no widget data (when used by a wallet).
                   !widgetData ||
                     (vestingSource.version &&
@@ -658,8 +683,8 @@ export const makeManageVestingAction: ActionMaker<ManageVestingData> = (
               start_time:
                 begin.startDate && !isNaN(Date.parse(begin.startDate))
                   ? // milliseconds => nanoseconds
-                    Math.round(
-                      new Date(begin.startDate).getTime() * 1e6
+                    BigInt(
+                      Math.round(new Date(begin.startDate).getTime() * 1e6)
                     ).toString()
                   : '',
               title: begin.title,
@@ -701,9 +726,9 @@ export const makeManageVestingAction: ActionMaker<ManageVestingData> = (
                     funds: [],
                     msg: {
                       send: {
-                        amount: total,
+                        amount: BigInt(total).toString(),
                         contract: vestingSource.factory,
-                        msg: encodeMessageAsBase64({
+                        msg: encodeJsonToBase64({
                           instantiate_payroll_contract: msg,
                         }),
                       },
@@ -792,8 +817,9 @@ export const makeManageVestingAction: ActionMaker<ManageVestingData> = (
         },
         [
           loadingTokenBalances,
-          nativeUnstakingDurationSecondsLoadable,
+          preV1Vesting,
           preV1VestingFactoryOwner,
+          nativeUnstakingDurationSecondsLoadable,
           loadingVestingInfos,
         ]
       )
@@ -874,7 +900,7 @@ export const makeManageVestingAction: ActionMaker<ManageVestingData> = (
         },
       }) &&
       objectMatchesStructure(
-        parseEncodedMessage(msg.wasm.execute.msg.send.msg),
+        decodeJsonFromBase64(msg.wasm.execute.msg.send.msg, true),
         {
           instantiate_payroll_contract: instantiateStructure,
         }
@@ -934,8 +960,10 @@ export const makeManageVestingAction: ActionMaker<ManageVestingData> = (
       // isCw20Begin
       else {
         // Extract instantiate message from cw20 send message.
-        instantiateMsg = parseEncodedMessage(msg.wasm.execute.msg.send.msg)
-          .instantiate_payroll_contract.instantiate_msg as VestingInstantiateMsg
+        instantiateMsg = decodeJsonFromBase64(
+          msg.wasm.execute.msg.send.msg,
+          true
+        ).instantiate_payroll_contract?.instantiate_msg as VestingInstantiateMsg
       }
     }
 

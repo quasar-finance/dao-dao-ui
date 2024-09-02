@@ -4,7 +4,7 @@ import { Addr, WithChainId } from '@dao-dao/types'
 import {
   Config,
   HooksResponse,
-  ProposalCreationPolicyResponse,
+  ProposalCreationPolicy,
   ProposalListResponse,
   ProposalResponse,
   VoteInfo,
@@ -276,7 +276,7 @@ export const listVotesSelector = selectorFamily<
     },
 })
 export const proposalCreationPolicySelector = selectorFamily<
-  ProposalCreationPolicyResponse,
+  ProposalCreationPolicy,
   QueryClientParams & {
     params: Parameters<DaoProposalMultipleQueryClient['proposalCreationPolicy']>
   }
@@ -366,6 +366,30 @@ export const listAllVotesSelector = selectorFamily<
   get:
     ({ proposalId, ...queryClientParams }) =>
     async ({ get }) => {
+      // Attempt to load all from indexer first.
+      const id =
+        get(refreshProposalsIdAtom) +
+        get(
+          refreshProposalIdAtom({
+            address: queryClientParams.contractAddress,
+            proposalId,
+          })
+        )
+
+      const indexerVotes = get(
+        queryContractIndexerSelector({
+          ...queryClientParams,
+          formula: 'daoProposalMultiple/listVotes',
+          args: {
+            proposalId,
+          },
+          id,
+        })
+      )
+      if (indexerVotes) {
+        return indexerVotes
+      }
+
       const votes: VoteInfo[] = []
 
       while (true) {

@@ -101,9 +101,10 @@ export const ProfileCardMemberInfoTokens = ({
   const canBeMemberButIsnt = !isMember && hasUnstaked
 
   const onlyOneToken = !loadingTokens.loading && loadingTokens.data.length === 1
-  const onlyTokenSymbol = loadingTokens.loading
-    ? '...'
-    : loadingTokens.data[0].token.symbol
+  const onlyTokenSymbol =
+    loadingTokens.loading || loadingTokens.data.length === 0
+      ? '...'
+      : loadingTokens.data[0].token.symbol
 
   // If cannot vote on proposal, this means they did not have voting power at
   // the time of proposal creation. Show proposal-specific message when in a
@@ -210,7 +211,7 @@ export const ProfileCardMemberInfoTokens = ({
                 'text-right font-mono',
                 loadingVotingPower.loading
                   ? 'animate-pulse text-text-tertiary'
-                  : 'text-text-primary'
+                  : 'text-text-brand-secondary'
               )}
             >
               {loadingVotingPower.loading
@@ -266,11 +267,13 @@ export const ProfileCardMemberInfoTokens = ({
             onClick={onClaim}
             size="lg"
             variant={
-              // If stake button below is primary, don't make this primary.
-              canBeMemberButIsnt ? 'secondary' : 'primary'
+              // If stake button below is brand, don't make this brand.
+              canBeMemberButIsnt ? 'secondary' : 'brand'
             }
           >
-            {loadingTokens.loading || !onlyOneToken
+            {loadingTokens.loading ||
+            loadingTokens.data.length === 0 ||
+            !onlyOneToken
               ? t('button.claimYourTokens')
               : t('button.claimNumTokens', {
                   amount: claimableBalance.toLocaleString(undefined, {
@@ -287,7 +290,7 @@ export const ProfileCardMemberInfoTokens = ({
           loading={stakingLoading}
           onClick={onStake}
           size="lg"
-          variant={canBeMemberButIsnt ? 'primary' : 'secondary'}
+          variant={canBeMemberButIsnt ? 'brand' : 'secondary'}
         >
           {loadingTokens.loading || !hasStaked
             ? onlyOneToken
@@ -301,6 +304,7 @@ export const ProfileCardMemberInfoTokens = ({
 
       {!hideUnstaking && (
         <UnstakingModal
+          claimingLoading={claimingLoading}
           onClaim={onClaim}
           onClose={() => setShowUnstakingTokens(false)}
           refresh={refreshUnstakingTasks}

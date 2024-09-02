@@ -1,25 +1,20 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo } from 'react'
 import { waitForAll } from 'recoil'
 
-import { configSelector } from '@dao-dao/state/recoil/selectors/contracts/DaoCore.v2'
-import { useCachedLoadable } from '@dao-dao/stateless'
-import { FeedDaoWithItems, FeedFilter, FeedState } from '@dao-dao/types'
-import { getFallbackImage } from '@dao-dao/utils'
+import { lazyDaoCardPropsSelector } from '@dao-dao/state/recoil'
+import { useCachedLoadable, useUpdatingRef } from '@dao-dao/stateless'
+import { FeedDaoWithItems, FeedState } from '@dao-dao/types'
 
 import { getSources } from '../core'
 
-export type UseFeedOptions = {
-  filter?: FeedFilter
-}
-
-export const useFeed = ({ filter = {} }: UseFeedOptions = {}): FeedState => {
+export const useFeed = (): FeedState => {
   const sources = getSources().map(({ id, Renderer, useData }) => ({
     id,
     Renderer,
     // Safe to disable since `getSources` is constant. The hooks are always
     // called in the same order.
     // eslint-disable-next-line react-hooks/rules-of-hooks
-    data: useData(filter),
+    data: useData(),
   }))
 
   // Memoize sources since the reference will change on every render. Update it
@@ -43,12 +38,11 @@ export const useFeed = ({ filter = {} }: UseFeedOptions = {}): FeedState => {
 
   // Update all sources once per minute. Memoize refresh function so that it
   // doesn't restart the interval when the ref changes.
-  const refreshRef = useRef(refresh)
-  refreshRef.current = refresh
+  const refreshRef = useUpdatingRef(refresh)
   useEffect(() => {
     const interval = setInterval(() => refreshRef.current(), 60 * 1000)
     return () => clearInterval(interval)
-  }, [])
+  }, [refreshRef])
 
   // Sort and combine items from all sources.
   const { pendingItemCount, totalItemCount, sourceDaosWithItems } =
@@ -117,22 +111,21 @@ export const useFeed = ({ filter = {} }: UseFeedOptions = {}): FeedState => {
       }
     }, [memoizedSources])
 
-  // Get DAO configs for all DAOs found.
-  const daoConfigs = useCachedLoadable(
+  // Get info for all DAOs found.
+  const daoLazyCardProps = useCachedLoadable(
     waitForAll(
       sourceDaosWithItems.map(({ chainId, coreAddress }) =>
-        configSelector({
+        lazyDaoCardPropsSelector({
           chainId,
-          contractAddress: coreAddress,
-          params: [],
+          coreAddress,
         })
       )
     )
   )
 
-  // Combine DAO configs with DAOs and items.
+  // Combine DAO info with DAOs and items.
   const daosWithItems = useMemo(() => {
-    if (daoConfigs.state !== 'hasValue') {
+    if (daoLazyCardProps.state !== 'hasValue') {
       return []
     }
 
@@ -142,14 +135,12 @@ export const useFeed = ({ filter = {} }: UseFeedOptions = {}): FeedState => {
           { chainId, coreAddress, items },
           index
         ): FeedDaoWithItems | undefined =>
-          daoConfigs.contents[index] && {
+          daoLazyCardProps.contents[index] && {
             dao: {
               chainId,
               coreAddress,
-              name: daoConfigs.contents[index].name,
-              imageUrl:
-                daoConfigs.contents[index].image_url ||
-                getFallbackImage(coreAddress),
+              name: daoLazyCardProps.contents[index].info.name,
+              imageUrl: daoLazyCardProps.contents[index].info.imageUrl,
             },
             items,
           }
@@ -157,7 +148,7 @@ export const useFeed = ({ filter = {} }: UseFeedOptions = {}): FeedState => {
       .filter(
         (daoWithItems): daoWithItems is FeedDaoWithItems => !!daoWithItems
       )
-  }, [daoConfigs, sourceDaosWithItems])
+  }, [daoLazyCardProps, sourceDaosWithItems])
 
   return {
     loading: sources.some(({ data: { loading } }) => loading),

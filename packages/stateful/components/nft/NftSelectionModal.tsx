@@ -17,6 +17,7 @@ import {
   PAGINATION_MIN_PAGE,
   Pagination,
   SearchBar,
+  TooltipInfoIcon,
 } from '@dao-dao/stateless'
 import { useButtonPopupFilter, useSearchFilter } from '@dao-dao/stateless/hooks'
 import {
@@ -26,7 +27,11 @@ import {
   NftSelectionModalProps,
   TypedOption,
 } from '@dao-dao/types'
-import { getChainForChainId, getDisplayNameForChainId } from '@dao-dao/utils'
+import {
+  convertDurationToHumanReadableString,
+  getChainForChainId,
+  getDisplayNameForChainId,
+} from '@dao-dao/utils'
 
 import { LazyNftCard } from './LazyNftCard'
 
@@ -49,7 +54,9 @@ export const NftSelectionModal = ({
   allowSelectingNone,
   selectedDisplay,
   headerDisplay,
+  headerContent,
   noneDisplay,
+  unstakingDuration,
   ...modalProps
 }: NftSelectionModalProps) => {
   const { t } = useTranslation()
@@ -93,19 +100,13 @@ export const NftSelectionModal = ({
   )
   const nftChains = uniqueChainIds.map(getChainForChainId)
   const filterOptions = useMemo(
-    () => [
+    (): TypedOption<FilterFn<{ chainId: string }>>[] => [
       {
-        id: 'all',
         label: t('title.all'),
         value: () => true,
       },
       ...nftChains.map(
-        (
-          chain
-        ): TypedOption<FilterFn<{ chainId: string }>> & {
-          id: string
-        } => ({
-          id: chain.chain_name,
+        (chain): TypedOption<FilterFn<{ chainId: string }>> => ({
           label: getDisplayNameForChainId(chain.chain_id),
           value: (nft) => nft.chainId === chain.chain_id,
         })
@@ -148,6 +149,9 @@ export const NftSelectionModal = ({
     _nftPage,
     Math.ceil(filteredSearchedNfts.length / NFTS_PER_PAGE)
   )
+
+  const showHeaderNftControls =
+    nfts.loading || nfts.errored || nfts.data.length > 0
 
   return (
     <Modal
@@ -198,58 +202,92 @@ export const NftSelectionModal = ({
         </div>
       }
       headerContent={
-        headerDisplay ||
-        nfts.loading ||
-        nfts.errored ||
-        nfts.data.length > 0 ? (
+        headerDisplay || showHeaderNftControls || headerContent ? (
           <div className="mt-4 flex flex-col gap-4">
+            {unstakingDuration &&
+              ('height' in unstakingDuration
+                ? unstakingDuration.height
+                : unstakingDuration.time) > 0 && (
+                <div className="-mt-3 flex flex-row items-center gap-1">
+                  <p className="secondary-text">
+                    {t('title.unstakingPeriod') +
+                      `: ${convertDurationToHumanReadableString(
+                        t,
+                        unstakingDuration
+                      )}`}
+                  </p>
+                  <TooltipInfoIcon
+                    size="xs"
+                    title={t('info.unstakingMechanics', {
+                      humanReadableTime: convertDurationToHumanReadableString(
+                        t,
+                        unstakingDuration
+                      ),
+                    })}
+                  />
+                </div>
+              )}
+
             {headerDisplay}
 
-            <SearchBar
-              autoFocus={modalProps.visible}
-              placeholder={t('info.searchNftsPlaceholder')}
-              {...searchBarProps}
-            />
+            {showHeaderNftControls && (
+              <>
+                <SearchBar
+                  autoFocus={modalProps.visible}
+                  placeholder={t('info.searchNftsPlaceholder')}
+                  {...searchBarProps}
+                />
 
-            <div
-              className={clsx(
-                'flex flex-row flex-wrap items-center gap-x-8 gap-y-4',
-                // Push sort/filter to the right no matter what.
-                showSelectAll ? 'justify-between' : 'justify-end'
-              )}
-            >
-              {showSelectAll && (
-                <Button
-                  className="text-text-interactive-active"
-                  disabled={nfts.loading}
-                  onClick={
-                    nfts.loading
-                      ? undefined
-                      : nfts.data.length === selectedKeys.length
-                      ? onDeselectAll
-                      : onSelectAll
-                  }
-                  variant="underline"
+                <div
+                  className={clsx(
+                    'flex flex-row flex-wrap items-center gap-x-8 gap-y-4',
+                    // Push sort/filter to the right no matter what.
+                    showSelectAll ? 'justify-between' : 'justify-end'
+                  )}
                 >
-                  {!nfts.loading &&
-                    (nfts.data.length === selectedKeys.length
-                      ? t('button.deselectAllNfts', { count: nfts.data.length })
-                      : t('button.selectAllNfts', { count: nfts.data.length }))}
-                </Button>
-              )}
+                  {showSelectAll && (
+                    <Button
+                      className="text-text-interactive-active"
+                      disabled={nfts.loading}
+                      onClick={
+                        nfts.loading
+                          ? undefined
+                          : nfts.data.length === selectedKeys.length
+                          ? onDeselectAll
+                          : onSelectAll
+                      }
+                      variant="underline"
+                    >
+                      {!nfts.loading &&
+                        (nfts.data.length === selectedKeys.length
+                          ? t('button.deselectAllNfts', {
+                              count: nfts.data.length,
+                            })
+                          : t('button.selectAllNfts', {
+                              count: nfts.data.length,
+                            }))}
+                    </Button>
+                  )}
 
-              <div className="flex grow flex-row items-center justify-end">
-                <ButtonPopup position="left" {...filterNftButtonPopupProps} />
-              </div>
-            </div>
+                  <div className="flex grow flex-row items-center justify-end">
+                    <ButtonPopup
+                      position="left"
+                      {...filterNftButtonPopupProps}
+                    />
+                  </div>
+                </div>
 
-            <Pagination
-              className="mx-auto -mt-4"
-              page={nftPage}
-              pageSize={NFTS_PER_PAGE}
-              setPage={setNftPage}
-              total={filteredSearchedNfts.length}
-            />
+                <Pagination
+                  className="mx-auto -mt-4"
+                  page={nftPage}
+                  pageSize={NFTS_PER_PAGE}
+                  setPage={setNftPage}
+                  total={filteredSearchedNfts.length}
+                />
+              </>
+            )}
+
+            {headerContent}
           </div>
         ) : undefined
       }
@@ -272,6 +310,7 @@ export const NftSelectionModal = ({
           .map(({ item }) => (
             <LazyNftCard
               ref={selectedKeys[0] === item.key ? firstSelectedRef : undefined}
+              type="collection"
               {...item}
               key={item.key}
               checkbox={{

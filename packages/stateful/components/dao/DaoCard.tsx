@@ -1,44 +1,67 @@
+import { useRecoilValue } from 'recoil'
+
+import { mountedInBrowserAtom } from '@dao-dao/state/recoil'
 import {
   DaoCard as StatelessDaoCard,
-  useCachedLoading,
+  useLoadingPromise,
 } from '@dao-dao/stateless'
-import { DaoCardInfo } from '@dao-dao/types/components/DaoCard'
+import { DaoSource } from '@dao-dao/types'
+import {
+  FollowState,
+  StatefulDaoCardProps,
+} from '@dao-dao/types/components/DaoCard'
 
-import { useFollowingDaos, useWallet } from '../../hooks'
-import { daoCardInfoLazyDataSelector } from '../../recoil'
+import { useDaoClient, useFollowingDaos, useMembership } from '../../hooks'
 import { LinkWrapper } from '../LinkWrapper'
 
-export const DaoCard = (props: DaoCardInfo) => {
-  const { address: walletAddress } = useWallet({ chainId: props.chainId })
-  const { isFollowing, setFollowing, setUnfollowing, updatingFollowing } =
-    useFollowingDaos(props.chainId)
+export const DaoCard = (props: StatefulDaoCardProps) => {
+  const mountedInBrowser = useRecoilValue(mountedInBrowserAtom)
 
-  const lazyData = useCachedLoading(
-    daoCardInfoLazyDataSelector({
-      coreAddress: props.coreAddress,
-      chainId: props.chainId,
-      walletAddress,
-    }),
-    {
-      isMember: false,
-      tokenBalance: NaN,
-      proposalCount: NaN,
-    }
-  )
+  const { isFollowing, setFollowing, setUnfollowing, updatingFollowing } =
+    useFollowingDaos()
+
+  const { dao } = useDaoClient({
+    dao: props.info,
+  })
+  const { isMember } = useMembership({
+    dao: props.info,
+  })
+  const lazyData = useLoadingPromise({
+    promise: () => dao.getDaoCardLazyData(),
+    // Refresh if DAO changes.
+    deps: [dao],
+  })
+
+  const followedDao: DaoSource = {
+    chainId: props.info.chainId,
+    coreAddress: props.info.coreAddress,
+  }
+  const follow: FollowState = {
+    following: isFollowing(followedDao),
+    updatingFollowing,
+    onFollow: () =>
+      isFollowing(followedDao)
+        ? setUnfollowing(followedDao)
+        : setFollowing(followedDao),
+  }
 
   return (
     <StatelessDaoCard
       {...props}
       LinkWrapper={LinkWrapper}
-      follow={{
-        following: isFollowing(props.coreAddress),
-        updatingFollowing,
-        onFollow: () =>
-          isFollowing(props.coreAddress)
-            ? setUnfollowing(props.coreAddress)
-            : setFollowing(props.coreAddress),
-      }}
+      follow={follow}
+      isMember={isMember}
       lazyData={lazyData}
+      showParentDao={
+        /*
+         * Hide the parent DAO until the app is mounted in the browser since
+         * rendering it on the server causes a hydration error for some horrible
+         * reason. I think it has something to do with the fact that you're not
+         * supposed to nest an A tag inside of another A tag, and maybe the
+         * Next.js server is sanitizing it or something. Anyways, rip.
+         */
+        mountedInBrowser
+      }
     />
   )
 }

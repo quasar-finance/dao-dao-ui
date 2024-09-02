@@ -67,7 +67,7 @@ const config = {
     },
     {
       source: '/:locale',
-      destination: process.env.NEXT_PUBLIC_SDA_DEFAULT_DAO_ADDRESS,
+      destination: '/' + process.env.NEXT_PUBLIC_SDA_DEFAULT_DAO_ADDRESS,
       permanent: false,
       locale: false,
     },
@@ -80,13 +80,14 @@ const config = {
       process.env.CI !== 'true' || !process.env.SENTRY_AUTH_TOKEN,
   },
   images: {
+    unoptimized: true,
     domains: [
       'ipfs.stargaze.zone',
       'ipfs-gw.stargaze-apis.com',
       'i.stargaze-apis.com',
       'nftstorage.link',
       'ipfs.daodao.zone',
-      'img-proxy.ekez.workers.dev',
+      'img-proxy.daodao.zone',
       'raw.githubusercontent.com',
     ],
   },

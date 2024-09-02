@@ -3,6 +3,7 @@ import {
   DaoCreatedModalProps,
   DaoCreatedModal as StatelessDaoCreatedModal,
 } from '@dao-dao/stateless'
+import { DaoSource, FollowState } from '@dao-dao/types'
 
 import { useFollowingDaos } from '../hooks'
 import { LinkWrapper } from './LinkWrapper'
@@ -19,24 +20,28 @@ export const DaoCreatedModal = ({
   ...props
 }: StatefulDaoCreatedModalProps) => {
   const { isFollowing, setFollowing, setUnfollowing, updatingFollowing } =
-    useFollowingDaos(itemProps.chainId)
+    useFollowingDaos()
+
+  const followedDao: DaoSource = {
+    chainId: itemProps.info.chainId,
+    coreAddress: itemProps.info.coreAddress,
+  }
+  const follow: FollowState = {
+    following: isFollowing(followedDao),
+    updatingFollowing,
+    onFollow: () =>
+      isFollowing(followedDao)
+        ? setUnfollowing(followedDao)
+        : setFollowing(followedDao),
+  }
 
   return (
-    <ChainProvider chainId={itemProps.chainId}>
+    <ChainProvider chainId={itemProps.info.chainId}>
       <StatelessDaoCreatedModal
         {...props}
         itemProps={{
           ...itemProps,
-
-          follow: {
-            following: isFollowing(itemProps.coreAddress),
-            updatingFollowing,
-            onFollow: () =>
-              isFollowing(itemProps.coreAddress)
-                ? setUnfollowing(itemProps.coreAddress)
-                : setFollowing(itemProps.coreAddress),
-          },
-
+          follow,
           LinkWrapper,
         }}
       />

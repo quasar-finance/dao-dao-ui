@@ -1,32 +1,20 @@
-import { ExecuteResult } from '@cosmjs/cosmwasm-stargate'
 import { coins } from '@cosmjs/stargate'
 import { useCallback, useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
 import { useTranslation } from 'react-i18next'
-import {
-  constSelector,
-  useRecoilValueLoadable,
-  useSetRecoilState,
-} from 'recoil'
+import { constSelector, useRecoilValueLoadable } from 'recoil'
 
-import {
-  Cw20BaseSelectors,
-  nativeDenomBalanceSelector,
-  refreshWalletBalancesIdAtom,
-} from '@dao-dao/state'
+import { Cw20BaseSelectors, nativeDenomBalanceSelector } from '@dao-dao/state'
 import { useCachedLoadable } from '@dao-dao/stateless'
 import {
-  CHAIN_GAS_MULTIPLIER,
   MAX_NUM_PROPOSAL_CHOICES,
+  checkProposalSubmissionPolicy,
   expirationExpired,
-  findWasmAttributeValue,
   processError,
 } from '@dao-dao/utils'
 
 import {
   Cw20BaseHooks,
-  DaoPreProposeMultipleHooks,
-  DaoProposalMultipleHooks,
   useAwaitNextBlock,
   useMembership,
   useSimulateCosmosMsgs,
@@ -39,36 +27,25 @@ import {
   SimulateProposal,
   UsePublishProposal,
 } from '../../types'
-import { anyoneCanProposeSelector } from '../selectors'
 
 export const makeUsePublishProposal =
   ({
-    options: {
-      chain: { chain_id: chainId },
-      coreAddress,
-      proposalModule,
-    },
+    proposalModule,
     depositInfoSelector,
   }: MakeUsePublishProposalOptions): UsePublishProposal =>
   () => {
     const { t } = useTranslation()
     const {
+      dao: { chainId, coreAddress },
+      prePropose,
+    } = proposalModule
+    const {
       isWalletConnected,
       address: walletAddress,
-      getStargateClient,
-    } = useWallet({
-      chainId,
-    })
-    const { isMember = false } = useMembership({
-      coreAddress,
-    })
-
-    const anyoneCanPropose = useRecoilValueLoadable(
-      anyoneCanProposeSelector({
-        chainId,
-        preProposeAddress: proposalModule.prePropose?.address ?? null,
-      })
-    )
+      getSigningClient,
+      refreshBalances,
+    } = useWallet()
+    const { isMember = false } = useMembership()
 
     const depositInfo = useRecoilValueLoadable(depositInfoSelector)
     const depositInfoCw20TokenAddress =
@@ -98,8 +75,7 @@ export const makeUsePublishProposal =
                 owner: walletAddress,
                 // If pre-propose address set, give that one deposit allowance
                 // instead of proposal module.
-                spender:
-                  proposalModule.prePropose?.address || proposalModule.address,
+                spender: prePropose?.address || proposalModule.address,
               },
             ],
           })
@@ -152,25 +128,8 @@ export const makeUsePublishProposal =
             Number(nativeDepositTokenBalance.amount) <
               requiredProposalDeposit)))
 
-    const setRefreshWalletBalancesId = useSetRecoilState(
-      refreshWalletBalancesIdAtom(walletAddress ?? '')
-    )
-    const refreshBalances = useCallback(
-      () => setRefreshWalletBalancesId((id) => id + 1),
-      [setRefreshWalletBalancesId]
-    )
-
     const increaseCw20DepositAllowance = Cw20BaseHooks.useIncreaseAllowance({
       contractAddress: depositInfoCw20TokenAddress ?? '',
-      sender: walletAddress ?? '',
-    })
-
-    const doPropose = DaoProposalMultipleHooks.usePropose({
-      contractAddress: proposalModule.address,
-      sender: walletAddress ?? '',
-    })
-    const doProposePrePropose = DaoPreProposeMultipleHooks.usePropose({
-      contractAddress: proposalModule.prePropose?.address ?? '',
       sender: walletAddress ?? '',
     })
 
@@ -220,20 +179,23 @@ export const makeUsePublishProposal =
       [simulateMsgs, t]
     )
 
+    const cannotProposeReason = checkProposalSubmissionPolicy({
+      proposalModule: proposalModule.info,
+      address: walletAddress,
+      isMember,
+      t,
+    })
+
     const publishProposal: PublishProposal = useCallback(
       async (
         { title, description, choices },
         { failedSimulationBypassSeconds = 0 } = {}
       ) => {
-        if (!isWalletConnected) {
+        if (!isWalletConnected || !walletAddress) {
           throw new Error(t('error.logInToContinue'))
         }
-        if (
-          anyoneCanPropose.state === 'hasValue' &&
-          !anyoneCanPropose.contents &&
-          !isMember
-        ) {
-          throw new Error(t('error.mustBeMemberToCreateProposal'))
+        if (cannotProposeReason) {
+          throw new Error(cannotProposeReason)
         }
         if (depositUnsatisfied) {
           throw new Error(t('error.notEnoughForDeposit'))
@@ -299,7 +261,7 @@ export const makeUsePublishProposal =
             // If allowance expired, none.
             (expirationExpired(
               cw20DepositTokenAllowanceResponse.expires,
-              (await (await getStargateClient()).getBlock()).header.height
+              (await (await getSigningClient()).getBlock()).header.height
             )
               ? 0
               : Number(cw20DepositTokenAllowanceResponse.allowance))
@@ -309,11 +271,11 @@ export const makeUsePublishProposal =
           if (remainingAllowanceNeeded) {
             try {
               await increaseCw20DepositAllowance({
-                amount: remainingAllowanceNeeded.toString(),
+                amount: BigInt(remainingAllowanceNeeded).toString(),
                 spender:
                   // If pre-propose address set, give that one deposit allowance
                   // instead of proposal module.
-                  proposalModule.prePropose?.address || proposalModule.address,
+                  prePropose?.address || proposalModule.address,
               })
 
               // Allowances will not update until the next block has been added.
@@ -347,61 +309,34 @@ export const makeUsePublishProposal =
           choices,
         }
 
-        let response: ExecuteResult = proposalModule.prePropose
-          ? await doProposePrePropose(
-              {
-                msg: {
-                  propose: proposalData,
-                },
-              },
-              CHAIN_GAS_MULTIPLIER,
-              undefined,
-              proposeFunds
-            )
-          : await doPropose(
-              proposalData,
-              CHAIN_GAS_MULTIPLIER,
-              undefined,
-              proposeFunds
-            )
+        const response = await proposalModule.propose({
+          data: proposalData,
+          getSigningClient,
+          sender: walletAddress,
+          funds: proposeFunds,
+        })
 
         if (proposeFunds?.length) {
           refreshBalances()
         }
 
-        const proposalNumber = Number(
-          findWasmAttributeValue(
-            response.logs,
-            proposalModule.address,
-            'proposal_id'
-          ) ?? -1
-        )
-        if (proposalNumber === -1) {
-          throw new Error(t('error.proposalIdNotFound'))
-        }
-        const proposalId = `${proposalModule.prefix}${proposalNumber}`
-
-        return {
-          proposalNumber,
-          proposalId,
-        }
+        return response
       },
       [
         isWalletConnected,
-        anyoneCanPropose,
-        isMember,
+        walletAddress,
+        cannotProposeReason,
         depositUnsatisfied,
         simulationBypassExpiration,
         requiredProposalDeposit,
         depositInfoCw20TokenAddress,
         depositInfoNativeTokenDenom,
-        doProposePrePropose,
-        doPropose,
+        getSigningClient,
         t,
         simulateMsgs,
         cw20DepositTokenAllowanceResponse,
-        getStargateClient,
         increaseCw20DepositAllowance,
+        prePropose?.address,
         awaitNextBlock,
         refreshBalances,
       ]
@@ -410,10 +345,7 @@ export const makeUsePublishProposal =
     return {
       simulateProposal,
       publishProposal,
-      // Default to true while loading. This is safe because the contract will
-      // reject anyone who is unauthorized. Defaulting to true here results in
-      // hiding the error until the real value is ready.
-      anyoneCanPropose: anyoneCanPropose.valueMaybe() ?? true,
+      cannotProposeReason,
       depositUnsatisfied,
       simulationBypassExpiration,
     }

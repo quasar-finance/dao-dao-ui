@@ -1,45 +1,152 @@
-import { useState } from 'react'
+import uniqBy from 'lodash.uniqby'
+import { useEffect, useState } from 'react'
+import { useRecoilCallback } from 'recoil'
 
 import { DaoProposalMultipleSelectors } from '@dao-dao/state'
 import {
-  PaginatedProposalVotes,
   ProposalVote,
-  useCachedLoadingWithError,
+  ProposalVotes as StatelessProposalVotes,
+  useInfiniteScroll,
 } from '@dao-dao/stateless'
+import { BaseProposalVotesProps } from '@dao-dao/types'
 
 import { EntityDisplay } from '../../../../../components/EntityDisplay'
 import { useProposalModuleAdapterOptions } from '../../../../react/context'
-import { useLoadingProposal } from '../../hooks'
+import {
+  useLoadingProposal,
+  useLoadingVoteOptions,
+  useProposalRefreshers,
+} from '../../hooks'
 import { VoteDisplay } from './VoteDisplay'
 
 const VOTES_PER_PAGE = 20
 
-export const ProposalVotes = () => {
+export const ProposalVotes = (props: BaseProposalVotesProps) => {
   const {
     chain: { chain_id: chainId },
     proposalModule: { address: proposalModuleAddress },
     proposalNumber,
   } = useProposalModuleAdapterOptions()
+  const { refreshProposalId } = useProposalRefreshers()
 
   const loadingProposal = useLoadingProposal()
+  const voteOptions = useLoadingVoteOptions()
 
   const totalPower = loadingProposal.loading
     ? 0
     : Number(loadingProposal.data.total_power)
 
-  const votes = useCachedLoadingWithError(
-    // Don't load votes until proposal is ready so that the `totalPower`
-    // calculation in the transformation function works correctly.
-    loadingProposal.loading
-      ? undefined
-      : DaoProposalMultipleSelectors.listAllVotesSelector({
-          chainId,
-          contractAddress: proposalModuleAddress,
-          proposalId: proposalNumber,
-        }),
-    (data) =>
-      data
-        .map(
+  const [loading, setLoading] = useState(true)
+  const [noMoreVotes, setNoMoreVotes] = useState(false)
+  const [votes, setVotes] = useState<ProposalVote[]>([])
+  const loadVotes = useRecoilCallback(
+    ({ snapshot }) =>
+      async (
+        /**
+         * Reload all existing votes.
+         */
+        reloadAll = false
+      ) => {
+        // Don't load votes until proposal is ready so that the `totalPower`
+        // calculation in the transformation function works correctly.
+        if (loadingProposal.loading) {
+          return
+        }
+
+        setLoading(true)
+        try {
+          let newVotes: ProposalVote[] = []
+          let noMoreVotes = false
+
+          while (true) {
+            const pageVotes = (
+              await snapshot.getPromise(
+                DaoProposalMultipleSelectors.listVotesSelector({
+                  chainId,
+                  contractAddress: proposalModuleAddress,
+                  params: [
+                    {
+                      proposalId: proposalNumber,
+                      limit: VOTES_PER_PAGE,
+                      startAfter: reloadAll
+                        ? newVotes[newVotes.length - 1]?.voterAddress
+                        : votes[votes.length - 1]?.voterAddress,
+                    },
+                  ],
+                })
+              )
+            ).votes.map(
+              ({ vote, voter, power, rationale, votedAt }): ProposalVote => ({
+                voterAddress: voter,
+                vote,
+                votingPowerPercent:
+                  totalPower === 0 ? 0 : (Number(power) / totalPower) * 100,
+                rationale,
+                votedAt: votedAt ? new Date(votedAt) : undefined,
+              })
+            )
+
+            newVotes.push(...pageVotes)
+
+            // No more votes if we loaded less than the limit we requested.
+            noMoreVotes = pageVotes.length < VOTES_PER_PAGE
+            if (noMoreVotes) {
+              break
+            }
+
+            if (reloadAll) {
+              // If reloading all, stop once we load at least as many votes as
+              // we already have.
+              if (newVotes.length >= votes.length) {
+                break
+              }
+            } else {
+              break
+            }
+          }
+
+          setVotes((prev) =>
+            uniqBy(
+              // Reset votes array with new votes that started from the
+              // beginning if we're reloading all. Otherwise, just append.
+              [...(reloadAll ? [] : prev), ...newVotes],
+              ({ voterAddress }) => voterAddress
+            )
+          )
+          setNoMoreVotes(noMoreVotes)
+        } finally {
+          setLoading(false)
+        }
+      },
+    [
+      chainId,
+      proposalModuleAddress,
+      proposalNumber,
+      totalPower,
+      loadingProposal.loading,
+      votes,
+    ]
+  )
+  // Load once proposal is ready or refresh proposal ID changes.
+  useEffect(() => {
+    if (!loadingProposal.loading) {
+      loadVotes(true)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadingProposal.loading, refreshProposalId])
+
+  const getAllVotes = useRecoilCallback(
+    ({ snapshot }) =>
+      async () =>
+        (
+          await snapshot.getPromise(
+            DaoProposalMultipleSelectors.listAllVotesSelector({
+              chainId,
+              contractAddress: proposalModuleAddress,
+              proposalId: proposalNumber,
+            })
+          )
+        ).map(
           ({ vote, voter, power, rationale, votedAt }): ProposalVote => ({
             voterAddress: voter,
             vote,
@@ -49,44 +156,39 @@ export const ProposalVotes = () => {
             votedAt: votedAt ? new Date(votedAt) : undefined,
           })
         )
-        // Sort most recent first.
-        .sort((a, b) =>
-          a.votedAt && b.votedAt
-            ? b.votedAt.getTime() - a.votedAt.getTime()
-            : a.votedAt
-            ? -1
-            : b.votedAt
-            ? 1
-            : 0
-        )
   )
 
-  const [page, setPage] = useState(1)
+  const { infiniteScrollRef } = useInfiniteScroll({
+    loadMore: loadVotes,
+    disabled: loading || noMoreVotes,
+    infiniteScrollFactor: 0.1,
+  })
 
   return (
-    <PaginatedProposalVotes
+    <StatelessProposalVotes
       EntityDisplay={EntityDisplay}
       VoteDisplay={VoteDisplay}
-      pagination={{
-        page,
-        setPage,
-        pageSize: VOTES_PER_PAGE,
-        total: votes.loading || votes.errored ? 0 : votes.data.length,
-      }}
+      containerRef={infiniteScrollRef}
+      exportVoteTransformer={(vote) =>
+        voteOptions.loading
+          ? 'LOADING_ERROR'
+          : voteOptions.data.find(
+              (option) => option.value.option_id === vote.option_id
+            )?.label || 'UNKNOWN_ERROR'
+      }
+      getAllVotes={getAllVotes}
       votes={
-        votes.loading || votes.errored
-          ? votes
+        loading && votes.length === 0
+          ? { loading: true, errored: false }
           : {
               loading: false,
+              updating: loading,
               errored: false,
-              updating: votes.updating,
-              data: votes.data.slice(
-                (page - 1) * VOTES_PER_PAGE,
-                page * VOTES_PER_PAGE
-              ),
+              data: votes,
             }
       }
       votingOpen={!loadingProposal.loading && loadingProposal.data.votingOpen}
+      {...props}
     />
   )
 }

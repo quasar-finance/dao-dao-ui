@@ -1,4 +1,8 @@
 import {
+  lazyNftCardInfosForDaoSelector,
+  treasuryTokenCardInfosForDaoSelector,
+} from '@dao-dao/state'
+import {
   TreasuryTab as StatelessTreasuryTab,
   useCachedLoading,
   useDaoInfoContext,
@@ -10,15 +14,12 @@ import { getDaoProposalSinglePrefill } from '@dao-dao/utils'
 import { useActionForKey } from '../../../actions'
 import { useWallet } from '../../../hooks'
 import {
-  lazyNftCardInfosForDaoSelector,
-  treasuryTokenCardInfosForDaoSelector,
-} from '../../../recoil'
-import {
   useCw20CommonGovernanceTokenInfoIfExists,
   useCw721CommonGovernanceTokenInfoIfExists,
   useNativeCommonGovernanceTokenInfoIfExists,
 } from '../../../voting-module-adapter'
 import { ButtonLink } from '../../ButtonLink'
+import { IconButtonLink } from '../../IconButtonLink'
 import { LazyNftCard } from '../../nft'
 import { TreasuryHistoryGraph } from '../../TreasuryHistoryGraph'
 import { DaoFiatDepositModal } from '../DaoFiatDepositModal'
@@ -70,13 +71,38 @@ export const TreasuryTab = () => {
       : [],
   })
 
+  const configureRebalancerAction = useActionForKey(
+    ActionKey.ConfigureRebalancer
+  )
+  const configureRebalancerActionDefaults =
+    configureRebalancerAction?.useDefaults()
+  const configureRebalancerPrefill = getDaoProposalSinglePrefill({
+    actions: configureRebalancerAction
+      ? [
+          {
+            actionKey: ActionKey.ConfigureRebalancer,
+            data: configureRebalancerActionDefaults,
+          },
+        ]
+      : [],
+  })
+
   return (
     <StatelessTreasuryTab<TokenCardInfo, LazyNftCardInfo>
       ButtonLink={ButtonLink}
       FiatDepositModal={DaoFiatDepositModal}
+      IconButtonLink={IconButtonLink}
       NftCard={LazyNftCard}
       TokenLine={DaoTokenLine}
       TreasuryHistoryGraph={TreasuryHistoryGraph}
+      configureRebalancerHref={
+        // Prefill URL only valid if action exists.
+        configureRebalancerAction
+          ? getDaoProposalPath(daoInfo.coreAddress, 'create', {
+              prefill: configureRebalancerPrefill,
+            })
+          : undefined
+      }
       connected={isWalletConnected}
       createCrossChainAccountHref={
         // Only show create cross-chain account button if we can use the action

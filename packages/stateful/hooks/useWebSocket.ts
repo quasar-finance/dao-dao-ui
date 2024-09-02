@@ -1,14 +1,19 @@
 import { Channel } from 'pusher-js'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { constSelector, useRecoilValue, useSetRecoilState } from 'recoil'
 import { useDeepCompareMemoize } from 'use-deep-compare-effect'
 
 import {
+  indexerUpStatusSelector,
   indexerWebSocketChannelSubscriptionsAtom,
   indexerWebSocketSelector,
   mountedInBrowserAtom,
 } from '@dao-dao/state/recoil'
-import { useChain, useDaoInfoContext } from '@dao-dao/stateless'
+import {
+  useCachedLoadingWithError,
+  useDaoInfoContext,
+  useUpdatingRef,
+} from '@dao-dao/stateless'
 import { ParametersExceptFirst } from '@dao-dao/types'
 import {
   objectMatchesStructure,
@@ -142,8 +147,7 @@ export const useOnWebSocketMessage = (
   // Store callback in ref so it can be used in the effect without having to
   // reapply the handler on every re-render. This avoids having to pass in a
   // memoized `useCallback` function to prevent additional re-renders.
-  const callbackRef = useRef<OnMessageCallback>(onMessage)
-  callbackRef.current = onMessage
+  const callbackRef = useUpdatingRef<OnMessageCallback>(onMessage)
 
   const [listening, setListening] = useState(false)
 
@@ -178,18 +182,16 @@ export const useOnWebSocketMessage = (
       channels.forEach((channel) => channel.unbind('broadcast', handler))
       setListening(false)
     }
-  }, [channels, memoizedExpectedTypeOrTypes])
+  }, [callbackRef, channels, memoizedExpectedTypeOrTypes])
 
   // Store listening in ref so the fallback function can access it within the
   // same instance of the function without re-rendering.
-  const listeningRef = useRef(listening)
-  listeningRef.current = listening
+  const listeningRef = useUpdatingRef(listening)
 
   // Create a memoized fallback function that calls the callback with the
   // fallback data after waiting a block. This is useful for ensuring the
   // callback gets executed when the WebSocket is misbehaving.
-  const defaultFallbackDataRef = useRef(defaultFallbackData)
-  defaultFallbackDataRef.current = defaultFallbackData
+  const defaultFallbackDataRef = useUpdatingRef(defaultFallbackData)
   const fallback: OnMessageFallback = useCallback(
     async (data, { skipWait = false, onlyIfNotListening = true } = {}) => {
       // Do nothing if we are already listening.
@@ -205,7 +207,7 @@ export const useOnWebSocketMessage = (
 
       callbackRef.current(data ?? defaultFallbackDataRef.current ?? {}, true)
     },
-    []
+    [callbackRef, defaultFallbackDataRef, listeningRef]
   )
 
   return {
@@ -218,16 +220,29 @@ export const useOnDaoWebSocketMessage = (
   chainId: string,
   coreAddress: string,
   ...args: ParametersExceptFirst<typeof useOnWebSocketMessage>
-) =>
-  useOnWebSocketMessage(
-    [webSocketChannelNameForDao({ coreAddress, chainId })],
+) => {
+  const indexerUp = useCachedLoadingWithError(
+    indexerUpStatusSelector({
+      chainId,
+    })
+  )
+  const response = useOnWebSocketMessage(
+    [webSocketChannelNameForDao({ chainId, coreAddress })],
     ...args
   )
+  return {
+    ...response,
+    listening:
+      // Unless indexer is caught up, mark as not listening.
+      indexerUp.loading || indexerUp.errored || !indexerUp.data.caughtUp
+        ? false
+        : response.listening,
+  }
+}
 
 export const useOnCurrentDaoWebSocketMessage = (
   ...args: ParametersExceptFirst<typeof useOnWebSocketMessage>
 ) => {
-  const { chain_id: chainId } = useChain()
-  const { coreAddress } = useDaoInfoContext()
+  const { chainId, coreAddress } = useDaoInfoContext()
   return useOnDaoWebSocketMessage(chainId, coreAddress, ...args)
 }

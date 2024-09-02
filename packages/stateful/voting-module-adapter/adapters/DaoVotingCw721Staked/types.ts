@@ -1,4 +1,5 @@
 import {
+  ContractVersion,
   Duration,
   GenericToken,
   LoadingData,
@@ -11,10 +12,11 @@ export interface UseStakingInfoOptions {
   fetchClaims?: boolean
   fetchTotalStakedValue?: boolean
   fetchWalletStakedValue?: boolean
-  fetchWalletUnstakedValue?: boolean
+  fetchWalletUnstakedNfts?: boolean
 }
 
 export interface UseStakingInfoResponse {
+  stakingContractVersion: ContractVersion
   stakingContractAddress: string
   unstakingDuration?: Duration
   refreshTotals: () => void

@@ -3,8 +3,6 @@ import TimeAgo from 'react-timeago'
 import { constSelector, waitForAll } from 'recoil'
 
 import {
-  DaoPreProposeApprovalSingleSelectors,
-  DaoPreProposeApproverSelectors,
   DaoProposalSingleCommonSelectors,
   NeutronCwdSubdaoTimelockSingleSelectors,
   blockHeightSelector,
@@ -13,6 +11,7 @@ import {
 import {
   useCachedLoadable,
   useCachedLoading,
+  useCachedLoadingWithError,
   useTranslatedTimeDeltaFormatter,
 } from '@dao-dao/stateless'
 import {
@@ -20,10 +19,10 @@ import {
   Feature,
   LoadingData,
   PreProposeModuleType,
+  ProposalStatus,
   ProposalStatusEnum,
   ProposalTimestampInfo,
 } from '@dao-dao/types'
-import { Proposal as DaoPreProposeApprovalSingleProposal } from '@dao-dao/types/contracts/DaoPreProposeApprovalSingle'
 import {
   convertExpirationToDate,
   formatDate,
@@ -31,11 +30,12 @@ import {
   isFeatureSupportedByVersion,
 } from '@dao-dao/utils'
 
-import {
-  daoCoreProposalModulesSelector,
-  neutronOverruleProposalForTimelockedProposalSelector,
-} from '../../../../recoil'
+import { neutronOverruleProposalForTimelockedProposalSelector } from '../../../../recoil'
 import { useProposalModuleAdapterOptions } from '../../../react'
+import {
+  approvedIdForPreProposeApproverIdSelector,
+  approverIdForPreProposeApprovalIdSelector,
+} from '../selectors'
 import { ProposalWithMetadata } from '../types'
 
 // Returns a proposal wrapped in a LoadingData object to allow the UI to respond
@@ -62,9 +62,10 @@ export const useLoadingProposal = (): LoadingData<ProposalWithMetadata> => {
     (err) => console.error(err)
   )
 
-  let proposalStatus = loadingProposalResponse.loading
-    ? undefined
-    : loadingProposalResponse.data?.proposal.status
+  let proposalStatus: ProposalStatus | undefined =
+    loadingProposalResponse.loading
+      ? undefined
+      : loadingProposalResponse.data?.proposal.status
   // Update status to take into account Neutron pre-propose timelock/overrule
   // system.
   const usesNeutronPreProposeTimelockOverruleSystem =
@@ -130,164 +131,45 @@ export const useLoadingProposal = (): LoadingData<ProposalWithMetadata> => {
     })
   )
 
-  // TODO(approver): turn this into one selector
-  //! If this is proposal was approved by another proposal via the
+  //! If this proposal was approved by another proposal via the
   //! pre-propose-approver setup.
-  const usesApprover =
+  const approverProposalId = useCachedLoadingWithError(
     prePropose?.type === PreProposeModuleType.Approval &&
-    !!prePropose.config.preProposeApproverContract
-  const approverDaoProposalModules = useCachedLoading(
-    usesApprover
-      ? daoCoreProposalModulesSelector({
+      !!prePropose.config.preProposeApproverContract
+      ? approverIdForPreProposeApprovalIdSelector({
           chainId,
-          coreAddress: prePropose.config.approver,
+          preProposeAddress: prePropose.address,
+          proposalNumber,
+          isPreProposeApprovalProposal: false,
+          approver: prePropose.config.approver,
+          preProposeApproverContract:
+            prePropose.config.preProposeApproverContract,
         })
-      : undefined,
-    undefined
+      : constSelector(undefined)
   )
-  // Get prefix of proposal module with dao-pre-propose-approver attached so
-  // we can link to the approver proposal.
-  const approverDaoApproverProposalModulePrefix =
-    approverDaoProposalModules.loading || !usesApprover
-      ? undefined
-      : approverDaoProposalModules.data?.find(
-          (approverDaoProposalModule) =>
-            approverDaoProposalModule.prePropose?.type ===
-              PreProposeModuleType.Approver &&
-            approverDaoProposalModule.prePropose.address ===
-              prePropose.config.preProposeApproverContract
-        )?.prefix
-  // Get pre-propose proposal ID that was accepted to create this proposal.
-  const preProposeApprovalProposalId = useCachedLoading(
-    usesApprover
-      ? DaoPreProposeApprovalSingleSelectors.queryExtensionSelector({
-          chainId,
-          contractAddress: prePropose.address,
-          params: [
-            {
-              msg: {
-                completed_proposal_id_for_created_proposal_id: {
-                  id: proposalNumber,
-                },
-              },
-            },
-          ],
-        })
-      : undefined,
-    undefined
-  ) as LoadingData<number | undefined>
-  // Get approver proposal ID that was created to approve the pre-propose
-  // proposal.
-  const approverProposalNumber = useCachedLoading(
-    usesApprover &&
-      prePropose.config.preProposeApproverContract &&
-      !preProposeApprovalProposalId.loading &&
-      preProposeApprovalProposalId.data
-      ? DaoPreProposeApproverSelectors.queryExtensionSelector({
-          chainId,
-          contractAddress: prePropose.config.preProposeApproverContract,
-          params: [
-            {
-              msg: {
-                approver_proposal_id_for_pre_propose_approval_id: {
-                  id: preProposeApprovalProposalId.data,
-                },
-              },
-            },
-          ],
-        })
-      : undefined,
-    undefined
-  ) as LoadingData<number | undefined>
-  const approverProposalId =
-    approverDaoApproverProposalModulePrefix &&
-    !approverProposalNumber.loading &&
-    approverProposalNumber.data
-      ? `${approverDaoApproverProposalModulePrefix}${approverProposalNumber.data}`
-      : undefined
 
-  // TODO(approver): turn this into one selector
   //! If this is an approver proposal that approved another proposal.
-  const approvedAnotherProposal =
+  const approvedProposalId = useCachedLoadingWithError(
     prePropose?.type === PreProposeModuleType.Approver &&
-    proposalStatus === ProposalStatusEnum.Executed
-  const approvalDaoProposalModules = useCachedLoading(
-    approvedAnotherProposal
-      ? daoCoreProposalModulesSelector({
+      proposalStatus === ProposalStatusEnum.Executed
+      ? approvedIdForPreProposeApproverIdSelector({
           chainId,
-          coreAddress: prePropose.config.approvalDao,
+          preProposeAddress: prePropose.address,
+          proposalNumber,
+          approvalDao: prePropose.config.approvalDao,
+          preProposeApprovalContract:
+            prePropose.config.preProposeApprovalContract,
         })
-      : undefined,
-    undefined
+      : constSelector(undefined)
   )
-  // Get prefix of proposal module with dao-pre-propose-approval attached so we
-  // can link to the created proposal.
-  const approvalDaoApprovalProposalModulePrefix =
-    approvalDaoProposalModules.loading || !approvedAnotherProposal
-      ? undefined
-      : approvalDaoProposalModules.data?.find(
-          (approvalDaoProposalModule) =>
-            approvalDaoProposalModule.prePropose?.type ===
-              PreProposeModuleType.Approval &&
-            approvalDaoProposalModule.prePropose.address ===
-              prePropose.config.preProposeApprovalContract
-        )?.prefix
-  // Get pre-propose-approval proposal ID that was approved by this proposal.
-  const approvalProposalNumber = useCachedLoading(
-    approvedAnotherProposal
-      ? DaoPreProposeApproverSelectors.queryExtensionSelector({
-          chainId,
-          contractAddress: prePropose.address,
-          params: [
-            {
-              msg: {
-                pre_propose_approval_id_for_approver_proposal_id: {
-                  id: proposalNumber,
-                },
-              },
-            },
-          ],
-        })
-      : undefined,
-    undefined
-  ) as LoadingData<number | undefined>
-  // Get completed pre-propose proposal ID so we can extract the created
-  // proposal ID.
-  const completedPreProposeApprovalProposal = useCachedLoading(
-    approvedAnotherProposal &&
-      !approvalProposalNumber.loading &&
-      approvalProposalNumber.data
-      ? DaoPreProposeApprovalSingleSelectors.queryExtensionSelector({
-          chainId,
-          contractAddress: prePropose.config.preProposeApprovalContract,
-          params: [
-            {
-              msg: {
-                completed_proposal: {
-                  id: approvalProposalNumber.data,
-                },
-              },
-            },
-          ],
-        })
-      : undefined,
-    undefined
-  ) as LoadingData<DaoPreProposeApprovalSingleProposal | undefined>
-  const approvedProposalId =
-    approvalDaoApprovalProposalModulePrefix &&
-    !completedPreProposeApprovalProposal.loading &&
-    completedPreProposeApprovalProposal.data &&
-    'approved' in completedPreProposeApprovalProposal.data.status
-      ? `${approvalDaoApprovalProposalModulePrefix}${completedPreProposeApprovalProposal.data.status.approved.created_proposal_id}`
-      : undefined
 
   if (
     loadingProposalResponse.loading ||
     !loadingProposalResponse.data ||
     blocksPerYearLoadable.state !== 'hasValue' ||
     blockHeightLoadable.state !== 'hasValue' ||
-    (usesApprover && !approverProposalId) ||
-    (approvedAnotherProposal && !approvedProposalId) ||
+    approverProposalId.loading ||
+    approvedProposalId.loading ||
     loadingNeutronTimelockInfo.loading
   ) {
     return { loading: true }
@@ -345,6 +227,13 @@ export const useLoadingProposal = (): LoadingData<ProposalWithMetadata> => {
             <TimeAgo date={expirationDate} formatter={timeAgoFormatter} />
           ),
         }
+      : 'at_height' in proposal.expiration &&
+        proposal.expiration.at_height > blockHeightLoadable.contents
+      ? {
+          label: t('title.votingEndBlock'),
+          tooltip: t('info.votingEndBlockTooltip'),
+          content: BigInt(proposal.expiration.at_height).toLocaleString(),
+        }
       : undefined
     : executionDate
     ? {
@@ -360,7 +249,7 @@ export const useLoadingProposal = (): LoadingData<ProposalWithMetadata> => {
       }
     : completionDate
     ? {
-        label: t('info.completed'),
+        label: t('title.completed'),
         tooltip: formatDateTimeTz(completionDate),
         content: formatDate(completionDate),
       }
@@ -371,13 +260,19 @@ export const useLoadingProposal = (): LoadingData<ProposalWithMetadata> => {
           // just in case...
           expirationDate.getTime() > Date.now()
             ? t('title.expires')
-            : t('info.completed'),
+            : t('title.completed'),
         tooltip: formatDateTimeTz(expirationDate),
         content: formatDate(expirationDate),
       }
+    : 'at_height' in proposal.expiration
+    ? {
+        label: t('title.blockCompleted'),
+        tooltip: t('info.votingEndedBlockTooltip'),
+        content: BigInt(proposal.expiration.at_height).toLocaleString(),
+      }
     : undefined
 
-  const timestampInfo: ProposalTimestampInfo | undefined = expirationDate && {
+  const timestampInfo: ProposalTimestampInfo = {
     display: dateDisplay,
     expirationDate,
   }
@@ -392,8 +287,14 @@ export const useLoadingProposal = (): LoadingData<ProposalWithMetadata> => {
       votingOpen,
       executedAt:
         typeof executedAt === 'string' ? new Date(executedAt) : undefined,
-      approverProposalId,
-      approvedProposalId,
+      // On error, just return undefined so we still render the proposal.
+      approverProposalId: approverProposalId.errored
+        ? undefined
+        : approverProposalId.data,
+      // On error, just return undefined so we still render the proposal.
+      approvedProposalId: approvedProposalId.errored
+        ? undefined
+        : approvedProposalId.data,
       vetoTimelockExpiration,
       neutronTimelockOverrule: loadingNeutronTimelockInfo.data?.[1],
     },

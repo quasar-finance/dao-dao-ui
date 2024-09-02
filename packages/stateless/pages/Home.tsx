@@ -1,72 +1,215 @@
+import {
+  DescriptionOutlined,
+  HowToVote,
+  Link,
+  LockOutlined,
+  PeopleOutlined,
+  Public,
+  Search,
+} from '@mui/icons-material'
 import clsx from 'clsx'
+import { ComponentType, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { DaoCardInfo } from '@dao-dao/types'
+import {
+  DaoDaoIndexerAllStats,
+  LoadingData,
+  StatefulDaoCardProps,
+} from '@dao-dao/types'
 import { UNDO_PAGE_PADDING_HORIZONTAL_CLASSES } from '@dao-dao/utils'
 
 import {
-  Feed,
-  FeedProps,
-  FollowingDaos,
-  FollowingDaosProps,
+  Button,
+  DaoInfoCards,
   HorizontalScroller,
-  HorizontalScrollerProps,
+  SegmentedControls,
 } from '../components'
 
 export type HomeProps = {
-  featuredDaosProps: Pick<
-    HorizontalScrollerProps<DaoCardInfo>,
-    'Component' | 'items'
-  >
-  followingDaosProps: FollowingDaosProps
-  feedProps: FeedProps
-  connected: boolean
+  /**
+   * The stats.
+   */
+  stats: DaoDaoIndexerAllStats
+  /**
+   * The DAO card to render.
+   */
+  DaoCard: ComponentType<StatefulDaoCardProps>
+  /**
+   * Featured DAO cards to display on the home page.
+   */
+  featuredDaos: LoadingData<StatefulDaoCardProps[]>
+  /**
+   * Optionally show chain x/gov DAO cards.
+   */
+  chainGovDaos?: LoadingData<StatefulDaoCardProps[]>
+  /**
+   * Function to open the search modal.
+   */
+  openSearch: () => void
 }
 
-// Max width of 5xl = 64rem, container padding of 6 = 1.5rem
-const widthOfSidePadding = 'w-[max((100%-64rem)/2,1.5rem)]'
+type StatsMode = 'all' | 'month' | 'week'
 
 export const Home = ({
-  featuredDaosProps,
-  followingDaosProps,
-  feedProps,
-  connected,
+  stats,
+  DaoCard,
+  chainGovDaos,
+  featuredDaos,
+  openSearch,
 }: HomeProps) => {
   const { t } = useTranslation()
 
+  const [statsMode, setStatsMode] = useState<StatsMode>('all')
+
   return (
     <>
-      {/* Feed and Following DAOs*/}
-      {connected && (
-        <>
-          <div className="mb-8 w-full">
-            <Feed {...feedProps} />
+      <SegmentedControls<StatsMode>
+        className="w-max mb-4"
+        onSelect={setStatsMode}
+        selected={statsMode}
+        tabs={[
+          {
+            label: t('title.all'),
+            value: 'all',
+          },
+          {
+            label: '30d',
+            value: 'month',
+          },
+          {
+            label: '7d',
+            value: 'week',
+          },
+        ]}
+      />
+
+      <DaoInfoCards
+        cards={[
+          {
+            Icon: Public,
+            label: t('title.daos'),
+            value: stats[statsMode]?.daos.toLocaleString() ?? 'N/A',
+          },
+          {
+            Icon: DescriptionOutlined,
+            label: t('title.proposals'),
+            value: stats[statsMode]?.proposals.toLocaleString() ?? 'N/A',
+          },
+          {
+            Icon: HowToVote,
+            label: t('title.votesCast'),
+            value: stats[statsMode]?.votes.toLocaleString() ?? 'N/A',
+          },
+          {
+            Icon: PeopleOutlined,
+            label: t('title.uniqueVoters'),
+            value: stats[statsMode]?.uniqueVoters.toLocaleString() ?? 'N/A',
+          },
+          // Only show TVL and chain count when all is selected.
+          ...(statsMode === 'all'
+            ? [
+                {
+                  Icon: LockOutlined,
+                  label: t('title.tvl'),
+                  tooltip: t('info.estimatedTreasuryUsdValueTooltip'),
+                  value:
+                    stats.tvl !== null
+                      ? '$' +
+                        stats.tvl.toLocaleString(undefined, {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })
+                      : 'N/A',
+                },
+                // Only show the chain count if more than 1 (i.e. not on a
+                // chain-specific home page).
+                ...(stats.chains > 1
+                  ? [
+                      {
+                        Icon: Link,
+                        label: t('title.chains'),
+                        tooltip: t('info.chainsDeployedTooltip'),
+                        value: stats.chains.toLocaleString(),
+                      },
+                    ]
+                  : []),
+              ]
+            : []),
+        ]}
+        className="mb-8"
+        valueClassName="text-text-interactive-valid font-semibold font-mono"
+        wrap
+      />
+
+      {/* Chain governance DAOs */}
+      {chainGovDaos && (
+        <div className="flex flex-col items-center gap-4 mb-8">
+          <div className="flex-row items-center xs:items-end flex gap-2 justify-between self-stretch">
+            <p className="title-text text-lg">{t('title.chainGovernance')}</p>
+
+            <Button
+              contentContainerClassName="!gap-1.5 xs:!gap-2"
+              onClick={openSearch}
+              variant="none"
+            >
+              <Search
+                className="!text-icon-secondary !h-6 !w-6 xs:!h-5 xs:!w-5"
+                onClick={openSearch}
+              />
+              <p className="secondary-text xs:block hidden">
+                {t('button.findAnotherChain')}
+              </p>
+            </Button>
           </div>
 
-          <FollowingDaos {...followingDaosProps} />
-
-          {/* Divider */}
-          <div className="my-10 h-[1px] w-full bg-border-secondary"></div>
-        </>
+          <HorizontalScroller
+            Component={DaoCard}
+            containerClassName={clsx(
+              'self-stretch px-[1px]',
+              (chainGovDaos.loading || chainGovDaos.data.length > 0) &&
+                UNDO_PAGE_PADDING_HORIZONTAL_CLASSES
+            )}
+            // Margin offsets container padding.
+            itemClassName="w-64"
+            items={chainGovDaos}
+            // Max width of 5xl = 64rem, container padding of 6 = 1.5rem
+            shadowClassName="w-[max((100%-64rem)/2,1.5rem)]"
+          />
+        </div>
       )}
 
-      <div className="flex flex-col items-center gap-4">
-        <p className="title-text self-start text-lg">
-          {t('title.featuredDaos')}
-        </p>
+      {/* Featured DAOs */}
+      <div className="flex flex-col items-center gap-4 mb-2">
+        <div className="flex-row items-center xs:items-end flex gap-2 justify-between self-stretch">
+          <p className="title-text text-lg">{t('title.featuredDaos')}</p>
 
-        {/* Featured DAOs container */}
+          <Button
+            contentContainerClassName="!gap-1.5 xs:!gap-2"
+            onClick={openSearch}
+            variant="none"
+          >
+            <Search
+              className="!text-icon-secondary !h-6 !w-6 xs:!h-5 xs:!w-5"
+              onClick={openSearch}
+            />
+            <p className="secondary-text xs:block hidden">
+              {t('button.findAnotherDao')}
+            </p>
+          </Button>
+        </div>
+
         <HorizontalScroller
-          {...featuredDaosProps}
           // Margin offsets container padding.
+          Component={DaoCard}
           containerClassName={clsx(
             'self-stretch px-[1px]',
-            (featuredDaosProps.items.loading ||
-              featuredDaosProps.items.data.length > 0) &&
+            (featuredDaos.loading || featuredDaos.data.length > 0) &&
               UNDO_PAGE_PADDING_HORIZONTAL_CLASSES
           )}
           itemClassName="w-64"
-          shadowClassName={widthOfSidePadding}
+          items={featuredDaos}
+          // Max width of 5xl = 64rem, container padding of 6 = 1.5rem
+          shadowClassName="w-[max((100%-64rem)/2,1.5rem)]"
         />
       </div>
     </>

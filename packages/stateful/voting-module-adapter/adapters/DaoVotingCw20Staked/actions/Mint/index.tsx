@@ -10,10 +10,9 @@ import {
   UseTransformToCosmos,
 } from '@dao-dao/types/actions'
 import {
-  convertDenomToMicroDenomWithDecimals,
+  convertDenomToMicroDenomStringWithDecimals,
   convertMicroDenomToDenomWithDecimals,
-  makeExecutableMintMessage,
-  makeMintMessage,
+  makeWasmMessage,
 } from '@dao-dao/utils'
 
 import { AddressInput } from '../../../../../components'
@@ -26,29 +25,35 @@ export interface MintData {
 }
 
 const useTransformToCosmos: UseTransformToCosmos<MintData> = () => {
-  const { governanceTokenAddress, governanceTokenInfo } =
-    useGovernanceTokenInfo()
+  const { governanceToken } = useGovernanceTokenInfo()
 
   return useCallback(
-    (data: MintData) => {
-      const amount = convertDenomToMicroDenomWithDecimals(
-        data.amount,
-        governanceTokenInfo.decimals
-      )
-      return makeExecutableMintMessage(
-        makeMintMessage(amount.toString(), data.to),
-        governanceTokenAddress
-      )
-    },
-    [governanceTokenAddress, governanceTokenInfo.decimals]
+    (data: MintData) =>
+      makeWasmMessage({
+        wasm: {
+          execute: {
+            contract_addr: governanceToken.denomOrAddress,
+            msg: {
+              mint: {
+                amount: convertDenomToMicroDenomStringWithDecimals(
+                  data.amount,
+                  governanceToken.decimals
+                ),
+                recipient: data.to,
+              },
+            },
+            funds: [],
+          },
+        },
+      }),
+    [governanceToken]
   )
 }
 
 const useDecodedCosmosMsg: UseDecodedCosmosMsg<MintData> = (
   msg: Record<string, any>
 ) => {
-  const { governanceTokenAddress, governanceTokenInfo } =
-    useGovernanceTokenInfo()
+  const { governanceToken } = useGovernanceTokenInfo()
 
   return useMemo(() => {
     if (
@@ -57,7 +62,7 @@ const useDecodedCosmosMsg: UseDecodedCosmosMsg<MintData> = (
       'contract_addr' in msg.wasm.execute &&
       // Mint action only supports minting our own governance token. Let
       // custom action handle the rest of the mint messages for now.
-      msg.wasm.execute.contract_addr === governanceTokenAddress &&
+      msg.wasm.execute.contract_addr === governanceToken.denomOrAddress &&
       'mint' in msg.wasm.execute.msg &&
       'amount' in msg.wasm.execute.msg.mint &&
       'recipient' in msg.wasm.execute.msg.mint
@@ -68,24 +73,24 @@ const useDecodedCosmosMsg: UseDecodedCosmosMsg<MintData> = (
           to: msg.wasm.execute.msg.mint.recipient,
           amount: convertMicroDenomToDenomWithDecimals(
             msg.wasm.execute.msg.mint.amount,
-            governanceTokenInfo.decimals
+            governanceToken.decimals
           ),
         },
       }
     }
 
     return { match: false }
-  }, [governanceTokenAddress, governanceTokenInfo.decimals, msg])
+  }, [governanceToken, msg])
 }
 
 const Component: ActionComponent = (props) => {
-  const { token } = useGovernanceTokenInfo()
+  const { governanceToken } = useGovernanceTokenInfo()
 
   return (
     <StatelessMintComponent
       {...props}
       options={{
-        govToken: token,
+        govToken: governanceToken,
         AddressInput,
       }}
     />

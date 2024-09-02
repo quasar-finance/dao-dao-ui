@@ -6,34 +6,34 @@ import { useTranslation } from 'react-i18next'
 import {
   AccountType,
   ButtonLinkProps,
+  ChainId,
   DaoFiatDepositModalProps,
+  IconButtonLinkProps,
   LoadingData,
   LoadingDataWithError,
   LoadingNfts,
   LoadingTokens,
   TokenCardInfo,
   TreasuryHistoryGraphProps,
+  ValenceAccount,
 } from '@dao-dao/types'
 import {
-  concatAddressStartEnd,
+  NEUTRON_GOVERNANCE_DAO,
   getDisplayNameForChainId,
-  getImageUrlForChainId,
   serializeTokenSource,
 } from '@dao-dao/utils'
 
-import {
-  useButtonPopupSorter,
-  useDaoInfoContext,
-  useSupportedChainContext,
-  useTokenSortOptions,
-} from '../../../hooks'
+import { useDaoInfoContext, useSupportedChainContext } from '../../../contexts'
+import { useButtonPopupSorter, useTokenSortOptions } from '../../../hooks'
 import { ErrorPage } from '../../error'
+import { AccountSelector } from '../../inputs'
 import { LineLoaders } from '../../LineLoader'
 import { NftSection } from '../../nft/NftSection'
-import { ButtonPopup, FilterableItemPopup } from '../../popup'
+import { ButtonPopup } from '../../popup'
+import { StatusCard } from '../../StatusCard'
 import { TokenLineHeader } from '../../token'
 import { Tooltip, TooltipInfoIcon } from '../../tooltip'
-import { WarningCard } from '../../WarningCard'
+import { ValenceAccountsSection } from '../../ValenceAccountsSection'
 
 export type TreasuryTabProps<T extends TokenCardInfo, N extends object> = {
   connected: boolean
@@ -45,11 +45,17 @@ export type TreasuryTabProps<T extends TokenCardInfo, N extends object> = {
    * created.
    */
   createCrossChainAccountHref: string | undefined
+  /**
+   * Configure rebalancer proposal prefill URL. If undefined, this means the
+   * action cannot be used.
+   */
+  configureRebalancerHref: string | undefined
   FiatDepositModal: ComponentType<DaoFiatDepositModalProps>
   TreasuryHistoryGraph: ComponentType<TreasuryHistoryGraphProps>
   TokenLine: ComponentType<T>
   NftCard: ComponentType<N>
   ButtonLink: ComponentType<ButtonLinkProps>
+  IconButtonLink: ComponentType<IconButtonLinkProps>
 }
 
 export const TreasuryTab = <T extends TokenCardInfo, N extends object>({
@@ -57,22 +63,30 @@ export const TreasuryTab = <T extends TokenCardInfo, N extends object>({
   tokens,
   nfts,
   createCrossChainAccountHref,
+  configureRebalancerHref,
   FiatDepositModal,
   TreasuryHistoryGraph,
   TokenLine,
   NftCard,
   ButtonLink,
+  IconButtonLink,
 }: TreasuryTabProps<T, N>) => {
   const { t } = useTranslation()
   const {
     chain: { chain_id: currentChainId },
+    config: { noIndexer },
   } = useSupportedChainContext()
   const { chainId: daoChainId, coreAddress, accounts } = useDaoInfoContext()
 
   // Combine chain tokens into loadable, lazily. Load all that are ready.
-  const allTokens = useMemo((): LoadingDataWithError<T[]> => {
+  const { nonValenceTokens, valenceTokens } = useMemo((): {
+    nonValenceTokens: LoadingDataWithError<T[]>
+    valenceTokens: LoadingDataWithError<T[]>
+  } => {
     const chainTokens = Object.values(tokens)
-    return chainTokens.every((l) => l?.loading)
+    const allTokens: LoadingDataWithError<T[]> = chainTokens.every(
+      (l) => l?.loading
+    )
       ? {
           loading: true,
           errored: false,
@@ -96,6 +110,29 @@ export const TreasuryTab = <T extends TokenCardInfo, N extends object>({
             l && !l.loading && !l.errored ? l.data : []
           ),
         }
+
+    return {
+      nonValenceTokens:
+        allTokens.loading || allTokens.errored
+          ? allTokens
+          : {
+              // Filter out any valence account tokens.
+              ...allTokens,
+              data: allTokens.data.filter(
+                ({ owner }) => owner.type !== AccountType.Valence
+              ),
+            },
+      valenceTokens:
+        allTokens.loading || allTokens.errored
+          ? allTokens
+          : {
+              // Keep only valence account tokens.
+              ...allTokens,
+              data: allTokens.data.filter(
+                ({ owner }) => owner.type === AccountType.Valence
+              ),
+            },
+    }
   }, [tokens])
 
   // Combine chain tokens into loadable, lazily. Load all that are ready.
@@ -149,9 +186,16 @@ export const TreasuryTab = <T extends TokenCardInfo, N extends object>({
     sortedData: sortedTokens,
     buttonPopupProps: sortTokenButtonPopupProps,
   } = useButtonPopupSorter({
-    data: allTokens.loading || allTokens.errored ? undefined : allTokens.data,
+    data:
+      nonValenceTokens.loading || nonValenceTokens.errored
+        ? undefined
+        : nonValenceTokens.data,
     options: tokenSortOptions,
   })
+
+  const valenceAccounts = accounts.filter(
+    (a): a is ValenceAccount => a.type === AccountType.Valence
+  )
 
   return (
     <>
@@ -159,32 +203,16 @@ export const TreasuryTab = <T extends TokenCardInfo, N extends object>({
       <div className="mb-6 flex min-h-[3.5rem] flex-row items-center justify-between gap-8 border-b border-border-secondary pb-6">
         <p className="title-text text-text-body">{t('title.treasury')}</p>
 
-        <FilterableItemPopup
-          filterableItemKeys={FILTERABLE_KEYS}
-          items={accounts.map(({ chainId, address, type }) => ({
-            key: chainId + address,
-            label: getDisplayNameForChainId(chainId),
-            iconUrl: getImageUrlForChainId(chainId),
-            description: concatAddressStartEnd(address, 10, 6),
-            rightNode: (
-              <p className="caption-text self-end md:self-center">
-                {t(`accountTypeLabel.${type}`)}
-              </p>
-            ),
-            iconClassName: '!h-8 !w-8',
-            contentContainerClassName: '!gap-4',
-            chainId,
-            address,
-          }))}
+        <AccountSelector
+          accounts={accounts}
           onSelect={({ chainId, address }) => {
             navigator.clipboard.writeText(address)
             toast.success(
-              t('info.copiedDaoChainAddress', {
+              t('info.copiedChainAddress', {
                 chain: getDisplayNameForChainId(chainId),
               })
             )
           }}
-          searchPlaceholder={t('info.searchForAccount')}
           trigger={{
             type: 'button',
             props: {
@@ -202,20 +230,33 @@ export const TreasuryTab = <T extends TokenCardInfo, N extends object>({
         />
       </div>
 
-      <TreasuryHistoryGraph
-        address={coreAddress}
-        chainId={daoChainId}
-        className="mb-8 hidden rounded-md bg-background-tertiary p-6 md:flex"
-        graphClassName="max-h-[20rem]"
-        header={
-          <div className="flex flex-row items-center justify-center gap-1">
-            <p className="title-text">{t('title.treasuryValue')}</p>
+      {
+        // Don't show the treasury history graph if the DAO's chain doesn't
+        // support indexing or for the Neutron DAO for performance reasons.
+        !(
+          noIndexer ||
+          (daoChainId === ChainId.NeutronMainnet &&
+            coreAddress === NEUTRON_GOVERNANCE_DAO)
+        ) && (
+          <TreasuryHistoryGraph
+            address={coreAddress}
+            chainId={daoChainId}
+            className="mb-8 hidden rounded-md bg-background-tertiary p-6 sm:flex"
+            graphClassName="max-h-[20rem]"
+            header={
+              <div className="flex flex-row items-center justify-center gap-1">
+                <p className="title-text">{t('title.treasuryValue')}</p>
 
-            <TooltipInfoIcon size="sm" title={t('info.treasuryValueTooltip')} />
-          </div>
-        }
-        registerTokenColors={setTokenSourceColorMap}
-      />
+                <TooltipInfoIcon
+                  size="sm"
+                  title={t('info.treasuryValueTooltip')}
+                />
+              </div>
+            }
+            registerTokenColors={setTokenSourceColorMap}
+          />
+        )
+      }
 
       <div className="mb-6 flex flex-row flex-wrap items-center justify-between gap-x-6 gap-y-2">
         <p className="title-text">{t('title.tokens')}</p>
@@ -223,13 +264,13 @@ export const TreasuryTab = <T extends TokenCardInfo, N extends object>({
         <ButtonPopup position="left" {...sortTokenButtonPopupProps} />
       </div>
 
-      {allTokens.loading ? (
+      {nonValenceTokens.loading ? (
         <div className="space-y-1">
           <TokenLineHeader />
           <LineLoaders lines={7} type="token" />
         </div>
-      ) : allTokens.errored ? (
-        <ErrorPage error={allTokens.error} />
+      ) : nonValenceTokens.errored ? (
+        <ErrorPage error={nonValenceTokens.error} />
       ) : (
         <div className="space-y-1">
           <TokenLineHeader />
@@ -270,23 +311,40 @@ export const TreasuryTab = <T extends TokenCardInfo, N extends object>({
       {/* Show chain token load errors. */}
       {Object.entries(tokens).flatMap(([chainId, l]) =>
         l && l.errored ? (
-          <WarningCard
+          <StatusCard
             key={chainId}
             className="mt-6"
             content={t('error.loadingChainTokens', {
               chain: getDisplayNameForChainId(chainId),
             })}
+            style="warning"
           >
             <pre className="whitespace-pre-wrap text-xs text-text-interactive-error">
               {l.error instanceof Error ? l.error.message : l.error}
             </pre>
-          </WarningCard>
+          </StatusCard>
         ) : (
           []
         )
       )}
 
-      <NftSection NftCard={NftCard} className="mt-10" nfts={allNfts} />
+      {valenceAccounts.length > 0 && (
+        <ValenceAccountsSection
+          ButtonLink={ButtonLink}
+          IconButtonLink={IconButtonLink}
+          TokenLine={TokenLine}
+          TreasuryHistoryGraph={TreasuryHistoryGraph}
+          accounts={valenceAccounts}
+          className="mt-8"
+          configureRebalancerHref={configureRebalancerHref}
+          tokens={valenceTokens}
+        />
+      )}
+
+      {/* OmniFlix Hub NFTs are not yet supported. */}
+      {currentChainId !== ChainId.OmniflixHubMainnet && (
+        <NftSection NftCard={NftCard} className="mt-10" nfts={allNfts} />
+      )}
 
       {connected && !!depositFiatChainId && (
         <FiatDepositModal
@@ -303,5 +361,3 @@ export const TreasuryTab = <T extends TokenCardInfo, N extends object>({
     </>
   )
 }
-
-const FILTERABLE_KEYS = ['label', 'chainId', 'address']

@@ -12,8 +12,8 @@ import {
   WidgetVisibilityContext,
 } from '@dao-dao/types'
 import {
-  DAO_WIDGET_ITEM_NAMESPACE,
   getFilteredDaoItemsByPrefix,
+  getWidgetStorageItemKey,
 } from '@dao-dao/utils'
 
 import { useMembership } from '../../hooks'
@@ -32,15 +32,13 @@ export const useWidgets = ({
 }: UseWidgetsOptions = {}): UseWidgetsResult => {
   const { t } = useTranslation()
   const { chain_id: chainId } = useChain()
-  const { coreAddress, items } = useDaoInfoContext()
-  const { isMember = false } = useMembership({
-    coreAddress,
-  })
+  const { items } = useDaoInfoContext()
+  const { isMember = false } = useMembership()
 
   const loadingWidgets = useMemo((): LoadingData<LoadedWidget[]> => {
     const parsedWidgets = getFilteredDaoItemsByPrefix(
       items,
-      DAO_WIDGET_ITEM_NAMESPACE
+      getWidgetStorageItemKey('')
     )
       .map(([id, widgetJson]): DaoWidget | undefined => {
         try {

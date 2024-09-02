@@ -1,19 +1,20 @@
-import { DurationWithUnits } from '@dao-dao/types'
+import {
+  DaoCreationVotingConfigWithActiveThreshold,
+  DurationWithUnits,
+} from '@dao-dao/types'
 
 export enum GovernanceTokenType {
   New,
   Existing,
 }
 
-export interface CreatorData {
+export type CreatorData = {
   tokenType: GovernanceTokenType
-  existingGovernanceTokenDenomOrAddress: string
-  // TokenInfoResponse
-  existingGovernanceTokenInfo?: {
-    name: string
+  existingGovernanceNftCollectionAddress: string
+  existingCollectionInfo?: {
     symbol: string
-    total_supply?: string
-    _error?: undefined
   }
+  // Must be loaded on Secret Network.
+  secretCodeHash?: string
   unstakingDuration: DurationWithUnits
-}
+} & DaoCreationVotingConfigWithActiveThreshold

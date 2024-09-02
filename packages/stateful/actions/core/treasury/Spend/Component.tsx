@@ -1,14 +1,11 @@
-import {
-  ArrowRightAltRounded,
-  SubdirectoryArrowRightRounded,
-} from '@mui/icons-material'
-import { MultiChainMsg } from '@skip-router/core'
+import { ArrowRightAltRounded } from '@mui/icons-material'
 import clsx from 'clsx'
-import { ComponentType, RefAttributes, useCallback, useEffect } from 'react'
+import { ComponentType, RefAttributes, useEffect, useState } from 'react'
 import { useFormContext } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 
 import {
+  AccountSelector,
   Button,
   ChainLabel,
   ChainLogo,
@@ -20,10 +17,11 @@ import {
   InputThemedText,
   Loader,
   NumberInput,
+  PercentButton,
   SelectInput,
+  StatusCard,
   TokenAmountDisplay,
   TokenInput,
-  WarningCard,
   useDetectWrap,
 } from '@dao-dao/stateless'
 import {
@@ -37,6 +35,7 @@ import {
   GenericTokenBalanceWithOwner,
   LoadingData,
   LoadingDataWithError,
+  SkipMultiChainMsg,
   TokenType,
 } from '@dao-dao/types'
 import {
@@ -44,8 +43,8 @@ import {
   ActionContextType,
   ActionKey,
 } from '@dao-dao/types/actions'
+import { Params as NobleTariffParams } from '@dao-dao/types/protobuf/codegen/tariff/params'
 import {
-  convertDenomToMicroDenomWithDecimals,
   convertMicroDenomToDenomWithDecimals,
   formatDateTimeTz,
   formatPercentOf100,
@@ -53,52 +52,73 @@ import {
   getChainForChainId,
   getDisplayNameForChainId,
   getSupportedChainConfig,
+  isValidBech32Address,
   makeValidateAddress,
   processError,
   transformBech32Address,
   validatePositive,
   validateRequired,
 } from '@dao-dao/utils'
-import { Params as NobleTariffParams } from '@dao-dao/utils/protobuf/codegen/tariff/params'
 
 import { useActionOptions } from '../../../react'
 
-export interface SpendData {
+export type SpendData = {
   fromChainId: string
-  // If same as chainId, then normal spend or CW20 transfer. Otherwise, IBC
-  // transfer.
+  /*
+   * If same as fromChainId, then normal spend or CW20 transfer. Otherwise, IBC
+   * transfer.
+   */
   toChainId: string
-  // Address with the tokens. This is needed since there may be multiple
-  // accounts controlled by the DAO on the same chain.
+  /*
+   * Address with the tokens. This is needed since there may be multiple
+   * accounts controlled by the DAO on the same chain.
+   */
   from: string
   to: string
   amount: number
   denom: string
-
-  // Relative IBC transfer timeout after max voting period.
+  decimals: number
+  /**
+   * Whether or not `denom` is a CW20 token address. CW20 tokens cannot be sent
+   * to a different chain.
+   */
+  cw20: boolean
+  /**
+   * Relative IBC transfer timeout after max voting period.
+   */
   ibcTimeout?: DurationWithUnits
-  // Once created, this is loaded from the message.
+  /**
+   * Once created, this is loaded from the message.
+   */
   _absoluteIbcTimeout?: number
-
-  // If true, will not use the PFM optimized path from Skip.
+  /**
+   * If true, will not use the PFM optimized path from Skip.
+   */
   useDirectIbcPath?: boolean
-
-  _error?: string
-
-  // Defined once loaded for IBC transfers. Needed for transforming.
-  _skipIbcTransferMsg?: LoadingDataWithError<MultiChainMsg>
-
-  // Loaded from IBC transfer message on decode.
+  /**
+   * Defined once loaded for IBC transfers. Needed for transforming.
+   */
+  _skipIbcTransferMsg?: LoadingDataWithError<SkipMultiChainMsg>
+  /**
+   * Loaded from IBC transfer message on decode.
+   */
   _ibcData?: {
     sourceChannel: string
-    // Loaded for packet-forwarding-middleware detection after creation (likely
-    // created using Skip's router API).
+    /**
+     * Loaded for packet-forwarding-middleware detection after creation (likely
+     * created using Skip's router API).
+     */
     pfmMemo?: string
   }
 }
 
-export interface SpendOptions {
+export type SpendOptions = {
+  // The tokens in all accounts controlled by the spender.
   tokens: LoadingData<GenericTokenBalanceWithOwner[]>
+  // The current token input. May or may not be in the list of tokens above, if
+  // they entered a custom token.
+  token: LoadingDataWithError<GenericToken>
+  // The current recipient entity.
   currentEntity: Entity | undefined
   // If this is an IBC transfer, this is the path of chains.
   ibcPath: LoadingDataWithError<string[]>
@@ -120,6 +140,8 @@ export interface SpendOptions {
   AddressInput: ComponentType<
     AddressInputProps<SpendData> & RefAttributes<HTMLDivElement>
   >
+  // Hide the destination chain/address picker.
+  noChangeDestination?: boolean
 }
 
 export const SpendComponent: ActionComponent<SpendOptions> = ({
@@ -128,6 +150,7 @@ export const SpendComponent: ActionComponent<SpendOptions> = ({
   isCreating,
   options: {
     tokens,
+    token,
     currentEntity,
     ibcPath,
     ibcAmountOut,
@@ -137,6 +160,7 @@ export const SpendComponent: ActionComponent<SpendOptions> = ({
     neutronTransferFee,
     proposalModuleMaxVotingPeriodInBlocks,
     AddressInput,
+    noChangeDestination,
   },
   addAction,
   remove,
@@ -147,12 +171,13 @@ export const SpendComponent: ActionComponent<SpendOptions> = ({
     chain: { chain_id: mainChainId },
   } = useActionOptions()
 
-  const { register, watch, setValue, setError, clearErrors } =
-    useFormContext<SpendData>()
+  const { register, watch, setValue } = useFormContext<SpendData>()
 
   const spendChainId = watch((fieldNamePrefix + 'fromChainId') as 'fromChainId')
   const spendAmount = watch((fieldNamePrefix + 'amount') as 'amount')
   const spendDenom = watch((fieldNamePrefix + 'denom') as 'denom')
+  const spendDecimals = watch((fieldNamePrefix + 'decimals') as 'decimals')
+  const isCw20 = watch((fieldNamePrefix + 'cw20') as 'cw20')
   const from = watch((fieldNamePrefix + 'from') as 'from')
   const recipient = watch((fieldNamePrefix + 'to') as 'to')
   const useDirectIbcPath = watch(
@@ -171,7 +196,9 @@ export const SpendComponent: ActionComponent<SpendOptions> = ({
   const toChain = getChainForChainId(toChainId)
 
   // IBC transfer if destination chain ID is different from source chain ID.
-  const isIbc = spendChainId !== toChainId
+  // Don't show until amount is nonzero, since the Skip API requires a nonzero
+  // amount to compute the IBC path.
+  const showIbcPath = spendChainId !== toChainId && !!spendAmount
 
   // On destination chain ID change, update address intelligently.
   useEffect(() => {
@@ -198,10 +225,12 @@ export const SpendComponent: ActionComponent<SpendOptions> = ({
 
     // Convert wallet address to destination chain's format.
     if (currentEntity.type === EntityType.Wallet) {
-      newRecipient = transformBech32Address(
-        currentEntity.address,
-        toChain.chain_id
-      )
+      newRecipient =
+        // Use profile address if set, falling back to transforming the address
+        // (which is unreliable due to different chains using different HD
+        // paths).
+        currentEntity.profile?.chains[toChain.chain_id]?.address ||
+        transformBech32Address(currentEntity.address, toChain.chain_id)
     }
     // Get DAO core address or its corresponding polytone proxy. Clear if no
     // account on the destination chain.
@@ -218,114 +247,56 @@ export const SpendComponent: ActionComponent<SpendOptions> = ({
     }
   }, [context, currentEntity, fieldNamePrefix, recipient, setValue, toChain])
 
-  const validatePossibleSpend = useCallback(
-    (
-      from: string,
-      chainId: string,
-      denom: string,
-      amount: number
-    ): string | boolean => {
-      if (tokens.loading) {
-        return true
-      }
+  // If entering a custom token, we need to show a list of from chains/addresses
+  // that the DAO controls. Usually that information is retrieved from the token
+  // list.
+  const [customToken, setCustomToken] = useState(false)
 
-      const insufficientBalanceI18nKey =
-        context.type === ActionContextType.Wallet
-          ? 'error.insufficientWalletBalance'
-          : 'error.cantSpendMoreThanTreasury'
+  const loadedCustomToken =
+    customToken &&
+    !token.loading &&
+    !token.errored &&
+    token.data.chainId === spendChainId &&
+    token.data.denomOrAddress === spendDenom &&
+    token.data.decimals > 0
 
-      const tokenBalance = tokens.data.find(
-        ({ owner, token }) =>
-          owner.address === from &&
-          token.chainId === chainId &&
-          token.denomOrAddress === denom
-      )
-      if (tokenBalance) {
-        const microAmount = convertDenomToMicroDenomWithDecimals(
-          amount,
-          tokenBalance.token.decimals
+  // Don't select token if entering a custom token.
+  const selectedToken =
+    customToken || tokens.loading
+      ? undefined
+      : tokens.data.find(
+          ({ owner, token }) =>
+            owner.address === from &&
+            token.chainId === spendChainId &&
+            token.denomOrAddress === spendDenom &&
+            (token.type === TokenType.Cw20) === isCw20
         )
-
-        return (
-          microAmount <= Number(tokenBalance.balance) ||
-          t(insufficientBalanceI18nKey, {
-            amount: convertMicroDenomToDenomWithDecimals(
-              tokenBalance.balance,
-              tokenBalance.token.decimals
-            ).toLocaleString(undefined, {
-              maximumFractionDigits: tokenBalance.token.decimals,
-            }),
-            tokenSymbol: tokenBalance.token.symbol,
-          })
-        )
-      }
-
-      return t('error.unknownDenom', { denom })
-    },
-    [context.type, t, tokens]
-  )
-
-  // Update amount+denom combo error each time either field is updated instead
-  // of setting errors individually on each field. Since we only show one or the
-  // other and can't detect which error is newer, this would lead to the error
-  // not updating if amount set an error and then denom was changed.
-  useEffect(() => {
-    // Prevent infinite loops by not setting errors if already set, and only
-    // clearing errors unless already set.
-    const currentError = errors?._error
-
-    if (!spendDenom || !spendAmount) {
-      if (currentError) {
-        clearErrors((fieldNamePrefix + '_error') as '_error')
-      }
-      return
-    }
-
-    const validation = validatePossibleSpend(
-      from,
-      spendChainId,
-      spendDenom,
-      spendAmount
-    )
-    if (validation === true) {
-      if (currentError) {
-        clearErrors((fieldNamePrefix + '_error') as '_error')
-      }
-    } else if (typeof validation === 'string') {
-      if (!currentError || currentError.message !== validation) {
-        setError((fieldNamePrefix + '_error') as '_error', {
-          type: 'custom',
-          message: validation,
-        })
-      }
-    }
-  }, [
-    spendAmount,
-    spendDenom,
-    setError,
-    clearErrors,
-    validatePossibleSpend,
-    fieldNamePrefix,
-    errors?._error,
-    spendChainId,
-    from,
-  ])
-
-  const selectedToken = tokens.loading
-    ? undefined
-    : tokens.data.find(
-        ({ owner, token }) =>
-          owner.address === from &&
-          token.chainId === spendChainId &&
-          token.denomOrAddress === spendDenom
-      )
   const balance = convertMicroDenomToDenomWithDecimals(
     selectedToken?.balance ?? 0,
     selectedToken?.token.decimals ?? 0
   )
 
-  const { containerRef, childRef, wrapped } = useDetectWrap()
-  const Icon = wrapped ? SubdirectoryArrowRightRounded : ArrowRightAltRounded
+  const decimals = loadedCustomToken
+    ? token.data.decimals
+    : selectedToken?.token.decimals || 0
+
+  // A warning if the denom was not found in the treasury or the amount is too
+  // high. We don't want to make this an error because often people want to
+  // spend funds that a previous action makes available, so just show a warning.
+  const symbol = selectedToken?.token.symbol || spendDenom
+  const warning =
+    customToken || !isCreating || tokens.loading || !spendDenom
+      ? undefined
+      : !selectedToken
+      ? t('error.unknownDenom', { denom: spendDenom })
+      : spendAmount > balance
+      ? t('error.spendActionInsufficientWarning', {
+          amount: balance.toLocaleString(undefined, {
+            maximumFractionDigits: decimals,
+          }),
+          tokenSymbol: symbol,
+        })
+      : undefined
 
   const {
     containerRef: toContainerRef,
@@ -335,119 +306,256 @@ export const SpendComponent: ActionComponent<SpendOptions> = ({
 
   return (
     <>
-      <div
-        className="flex min-w-0 flex-row flex-wrap items-stretch justify-between gap-x-3 gap-y-1"
-        ref={containerRef}
-      >
-        <TokenInput
-          amount={{
-            watch,
-            setValue,
-            register,
-            fieldName: (fieldNamePrefix + 'amount') as 'amount',
-            error: errors?.amount,
-            min: convertMicroDenomToDenomWithDecimals(
-              1,
-              selectedToken?.token.decimals ?? 0
-            ),
-            max: balance,
-            step: convertMicroDenomToDenomWithDecimals(
-              1,
-              selectedToken?.token.decimals ?? 0
-            ),
-          }}
-          onSelectToken={({ type, owner, chainId, denomOrAddress }) => {
-            // If chain changes and the dest chain is the same, switch it.
-            if (spendChainId === toChainId && chainId !== spendChainId) {
-              setValue((fieldNamePrefix + 'toChainId') as 'toChainId', chainId)
-            }
+      {isCreating ? (
+        <>
+          <InputLabel className="-mb-2" name={t('form.from')} />
 
-            setValue(
-              (fieldNamePrefix + 'fromChainId') as 'fromChainId',
-              chainId
-            )
-            setValue((fieldNamePrefix + 'denom') as 'denom', denomOrAddress)
-            setValue((fieldNamePrefix + 'from') as 'from', owner.address)
+          <div className="flex min-w-0 flex-row flex-wrap items-stretch gap-1">
+            <AccountSelector
+              accounts={context.accounts}
+              className="w-auto grow"
+              disabled={
+                // Enable account picker if entering custom token since we can't
+                // automatically determine where it's coming from.
+                !isCreating || !customToken
+              }
+              onSelect={(account) => {
+                setValue(
+                  (fieldNamePrefix + 'fromChainId') as 'fromChainId',
+                  account.chainId
+                )
+                setValue((fieldNamePrefix + 'from') as 'from', account.address)
+              }}
+              selectedAccount={context.accounts.find(
+                (a) => a.chainId === spendChainId && a.address === from
+              )}
+            />
 
-            // If token is cw20, set destination chain to same as source.
-            if (type === TokenType.Cw20) {
-              setValue((fieldNamePrefix + 'toChainId') as 'toChainId', chainId)
-            }
-          }}
-          readOnly={!isCreating}
-          selectedToken={selectedToken?.token}
-          showChainImage
-          tokens={
-            tokens.loading
-              ? { loading: true }
-              : {
-                  loading: false,
-                  data: tokens.data.map(({ owner, balance, token }) => ({
-                    ...token,
-                    owner,
-                    description:
-                      t('title.balance') +
-                      ': ' +
-                      convertMicroDenomToDenomWithDecimals(
-                        balance,
-                        token.decimals
-                      ).toLocaleString(undefined, {
-                        maximumFractionDigits: token.decimals,
-                      }),
-                  })),
+            <TokenInput
+              allowCustomToken
+              amount={{
+                watch,
+                setValue,
+                register,
+                fieldName: (fieldNamePrefix + 'amount') as 'amount',
+                error: errors?.amount,
+                min: convertMicroDenomToDenomWithDecimals(1, decimals),
+                step: convertMicroDenomToDenomWithDecimals(1, decimals),
+                // For custom token, show unit if loaded successfully.
+                unit: loadedCustomToken ? token.data.symbol : undefined,
+                unitIconUrl: loadedCustomToken
+                  ? token.data.imageUrl
+                  : undefined,
+                unitClassName: '!text-text-primary',
+              }}
+              containerClassName={clsx('grow !max-w-full')}
+              onCustomTokenChange={(custom) => {
+                setValue((fieldNamePrefix + 'denom') as 'denom', custom)
+                // If denom entered is a valid contract address, it's most
+                // likely a cw20 token. I've never seen a native denom that was
+                // formatted like an address.
+                setValue(
+                  (fieldNamePrefix + 'cw20') as 'cw20',
+                  isValidBech32Address(
+                    custom,
+                    getChainForChainId(spendChainId).bech32_prefix
+                  )
+                )
+              }}
+              onSelectToken={(token) => {
+                setCustomToken(!token)
+
+                // Custom token
+                if (!token) {
+                  setValue((fieldNamePrefix + 'decimals') as 'decimals', 0)
+                  return
                 }
-          }
-        />
 
-        <div
-          className="flex min-w-0 grow flex-row items-stretch gap-2 sm:gap-3"
-          ref={childRef}
-        >
-          <div
-            className={clsx(
-              'flex flex-row items-center',
-              wrapped ? 'pl-1' : '-mr-2'
-            )}
-          >
-            <Icon className="!h-6 !w-6 text-text-secondary" />
+                // If chain changes and the dest chain is the same, switch it.
+                if (
+                  spendChainId === toChainId &&
+                  token.chainId !== spendChainId
+                ) {
+                  setValue(
+                    (fieldNamePrefix + 'toChainId') as 'toChainId',
+                    token.chainId
+                  )
+                }
+
+                setValue(
+                  (fieldNamePrefix + 'fromChainId') as 'fromChainId',
+                  token.chainId
+                )
+                setValue(
+                  (fieldNamePrefix + 'from') as 'from',
+                  token.owner.address
+                )
+
+                setValue(
+                  (fieldNamePrefix + 'denom') as 'denom',
+                  token.denomOrAddress
+                )
+                setValue(
+                  (fieldNamePrefix + 'decimals') as 'decimals',
+                  token.decimals
+                )
+                setValue(
+                  (fieldNamePrefix + 'cw20') as 'cw20',
+                  token.type === TokenType.Cw20
+                )
+
+                // If token is cw20, set destination chain to same as source.
+                if (token.type === TokenType.Cw20) {
+                  setValue(
+                    (fieldNamePrefix + 'toChainId') as 'toChainId',
+                    token.chainId
+                  )
+                }
+              }}
+              readOnly={!isCreating}
+              selectedToken={selectedToken?.token}
+              tokens={
+                tokens.loading
+                  ? { loading: true }
+                  : {
+                      loading: false,
+                      data: tokens.data.map(({ owner, balance, token }) => ({
+                        ...token,
+                        owner,
+                        description:
+                          t('title.balance') +
+                          ': ' +
+                          convertMicroDenomToDenomWithDecimals(
+                            balance,
+                            token.decimals
+                          ).toLocaleString(undefined, {
+                            maximumFractionDigits: token.decimals,
+                          }),
+                      })),
+                    }
+              }
+            />
           </div>
 
+          {isCreating && !!(errors?.amount || warning) && (
+            <div className="-mt-4 -ml-1 flex flex-col gap-1">
+              <InputErrorMessage error={errors?.amount} />
+              <InputErrorMessage error={warning} warning />
+            </div>
+          )}
+
+          {
+            // Show custom token load status and decimal conversion info once a
+            // denom has started being entered.
+            isCreating &&
+              customToken &&
+              !!spendDenom &&
+              (!token.loading && !token.updating ? (
+                loadedCustomToken ? (
+                  <StatusCard
+                    className="-mt-2"
+                    content={t('info.spendActionCustomTokenDecimalsFound', {
+                      tokenSymbol: token.data.symbol,
+                      decimals: token.data.decimals,
+                    })}
+                    size="xs"
+                    style="success"
+                  />
+                ) : (
+                  <StatusCard
+                    className="-mt-2"
+                    content={t('error.customTokenNoDecimals')}
+                    size="xs"
+                    style="warning"
+                  />
+                )
+              ) : (
+                <StatusCard
+                  className="-mt-2"
+                  content={t('info.loadingCustomToken')}
+                  size="xs"
+                  style="loading"
+                />
+              ))
+          }
+
+          {selectedToken && isCreating && (
+            <div className="flex flex-row justify-between flex-wrap items-center -mt-2 mb-2 gap-x-8 gap-y-2">
+              <div className="flex flex-row items-center gap-2">
+                <p className="caption-text">{t('info.yourBalance')}:</p>
+
+                <TokenAmountDisplay
+                  amount={balance}
+                  decimals={selectedToken.token.decimals}
+                  iconUrl={selectedToken.token.imageUrl}
+                  onClick={() =>
+                    setValue((fieldNamePrefix + 'amount') as 'amount', balance)
+                  }
+                  showFullAmount
+                  symbol={selectedToken.token.symbol}
+                />
+              </div>
+
+              {balance > 0 && (
+                <div className="grid grid-cols-5 gap-1">
+                  {[10, 25, 50, 75, 100].map((percent) => (
+                    <PercentButton
+                      key={percent}
+                      amount={spendAmount}
+                      decimals={spendDecimals}
+                      label={`${percent}%`}
+                      loadingMax={{ loading: false, data: balance }}
+                      percent={percent / 100}
+                      setAmount={(amount) =>
+                        setValue(
+                          (fieldNamePrefix + 'amount') as 'amount',
+                          amount
+                        )
+                      }
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          <InputLabel className="-mb-2" name={t('form.to')} />
+
           <div
-            className="flex grow flex-row flex-wrap items-stretch gap-1"
+            className="flex min-w-0 flex-row flex-wrap items-stretch gap-1"
             ref={toContainerRef}
           >
             {/* Cannot send over IBC from the gov module. */}
-            {isCreating && context.type !== ActionContextType.Gov && (
-              <IbcDestinationChainPicker
-                buttonClassName={toWrapped ? 'grow' : undefined}
-                disabled={selectedToken?.token.type === TokenType.Cw20}
-                includeSourceChain
-                onSelect={(chainId) => {
-                  // Type-check. None option is disabled so should not be
-                  // possible.
-                  if (!chainId) {
-                    return
-                  }
+            {isCreating &&
+              context.type !== ActionContextType.Gov &&
+              !noChangeDestination && (
+                <IbcDestinationChainPicker
+                  buttonClassName={toWrapped ? 'grow' : undefined}
+                  disabled={selectedToken?.token.type === TokenType.Cw20}
+                  includeSourceChain
+                  onSelect={(chainId) => {
+                    // Type-check. None option is disabled so should not be
+                    // possible.
+                    if (!chainId) {
+                      return
+                    }
 
-                  setValue(
-                    (fieldNamePrefix + 'toChainId') as 'toChainId',
-                    chainId
-                  )
-                }}
-                selectedChainId={toChainId}
-                sourceChainId={spendChainId}
-              />
-            )}
+                    setValue(
+                      (fieldNamePrefix + 'toChainId') as 'toChainId',
+                      chainId
+                    )
+                  }}
+                  selectedChainId={toChainId}
+                  sourceChainId={spendChainId}
+                />
+              )}
 
             {/* Change search address and placeholder based on destination chain. */}
-            <ChainProvider chainId={toChainId}>
-              <div
-                className="flex grow flex-row items-stretch"
-                ref={toChildRef}
-              >
+            <div className="flex grow flex-row items-stretch" ref={toChildRef}>
+              <ChainProvider chainId={toChainId}>
                 <AddressInput
                   containerClassName="grow"
-                  disabled={!isCreating}
+                  disabled={!isCreating || noChangeDestination}
                   error={errors?.to}
                   fieldName={(fieldNamePrefix + 'to') as 'to'}
                   register={register}
@@ -456,54 +564,43 @@ export const SpendComponent: ActionComponent<SpendOptions> = ({
                     makeValidateAddress(toChain.bech32_prefix),
                   ]}
                 />
-              </div>
-            </ChainProvider>
+              </ChainProvider>
+            </div>
           </div>
-        </div>
-      </div>
 
-      {(errors?.amount || errors?.denom || errors?.to || errors?._error) && (
-        <div className="-mt-4 flex flex-col gap-1">
-          <InputErrorMessage error={errors?.amount} />
-          <InputErrorMessage error={errors?.denom} />
-          <InputErrorMessage error={errors?.to} />
-          <InputErrorMessage error={errors?._error} />
-        </div>
-      )}
-
-      {selectedToken && isCreating && (
-        <div className="flex flex-row items-center gap-2">
-          <p className="secondary-text">{t('info.yourBalance')}:</p>
-
+          <InputErrorMessage className="-mt-4 -ml-1" error={errors?.to} />
+        </>
+      ) : (
+        <div className="flex flex-row gap-3 items-center">
           <TokenAmountDisplay
-            amount={balance}
-            decimals={selectedToken.token.decimals}
-            iconUrl={selectedToken.token.imageUrl}
+            amount={spendAmount}
+            decimals={spendDecimals}
+            iconClassName="!h-6 !w-6"
+            iconUrl={
+              token.loading || token.errored ? undefined : token.data.imageUrl
+            }
+            showChainId={spendChainId}
             showFullAmount
-            symbol={selectedToken.token.symbol}
+            symbol={
+              token.loading || token.errored ? spendDenom : token.data.symbol
+            }
           />
+
+          <ArrowRightAltRounded className="!h-6 !w-6 !text-icon-secondary" />
+
+          <ChainProvider chainId={toChainId}>
+            <AddressInput
+              containerClassName="-ml-2"
+              disabled
+              fieldName={(fieldNamePrefix + 'to') as 'to'}
+              register={register}
+            />
+          </ChainProvider>
         </div>
       )}
 
-      {selectedToken &&
-        !ibcAmountOut.loading &&
-        !ibcAmountOut.errored &&
-        ibcAmountOut.data && (
-          <div className="flex flex-row items-center gap-2">
-            <p className="secondary-text">{t('info.amountWillBeReceived')}:</p>
-
-            <TokenAmountDisplay
-              amount={ibcAmountOut.data}
-              decimals={selectedToken.token.decimals}
-              iconUrl={selectedToken.token.imageUrl}
-              showFullAmount
-              symbol={selectedToken.token.symbol}
-            />
-          </div>
-        )}
-
-      {isIbc && (
-        <div className="flex flex-col gap-4 rounded-md border-2 border-dashed border-border-primary p-4">
+      {showIbcPath && (
+        <div className="border-border-primary flex flex-col gap-3 rounded-md border-2 border-dashed p-4">
           <div className="flex flex-row flex-wrap items-start justify-between gap-x-8 gap-y-2">
             <InputLabel
               name={t('title.ibcTransferPath')}
@@ -553,7 +650,7 @@ export const SpendComponent: ActionComponent<SpendOptions> = ({
                     <ChainLabel chainId={chainId} />
 
                     {index !== ibcPath.data.length - 1 && (
-                      <ArrowRightAltRounded className="!h-5 !w-5 text-text-secondary" />
+                      <ArrowRightAltRounded className="text-text-secondary !h-5 !w-5" />
                     )}
                   </>
                 ))}
@@ -575,7 +672,7 @@ export const SpendComponent: ActionComponent<SpendOptions> = ({
               {!neutronTransferFee.loading &&
                 !neutronTransferFee.errored &&
                 neutronTransferFee.data && (
-                  <p className="secondary-text max-w-prose text-text-interactive-warning-body">
+                  <p className="secondary-text text-text-interactive-warning-body max-w-prose">
                     {t('info.neutronTransferFeeApplied', {
                       fee: neutronTransferFee.data
                         .map(({ token, balance }) =>
@@ -597,7 +694,7 @@ export const SpendComponent: ActionComponent<SpendOptions> = ({
               {isCreating &&
                 !betterNonPfmIbcPath.loading &&
                 betterNonPfmIbcPath.data && (
-                  <WarningCard
+                  <StatusCard
                     className="max-w-xl"
                     content={
                       <div className="flex flex-col gap-3">
@@ -618,18 +715,19 @@ export const SpendComponent: ActionComponent<SpendOptions> = ({
 
                               {index !==
                                 betterNonPfmIbcPath.data!.length - 1 && (
-                                <ArrowRightAltRounded className="!h-5 !w-5 text-text-secondary" />
+                                <ArrowRightAltRounded className="text-text-secondary !h-5 !w-5" />
                               )}
                             </>
                           ))}
                         </div>
                       </div>
                     }
+                    style="warning"
                   />
                 )}
 
               {isCreating && !!missingAccountChainIds?.length && (
-                <WarningCard
+                <StatusCard
                   className="max-w-xl"
                   content={
                     <div className="flex flex-col items-start gap-3">
@@ -684,6 +782,7 @@ export const SpendComponent: ActionComponent<SpendOptions> = ({
                       )}
                     </div>
                   }
+                  style="warning"
                 />
               )}
             </div>
@@ -758,11 +857,29 @@ export const SpendComponent: ActionComponent<SpendOptions> = ({
                 {formatDateTimeTz(new Date(_absoluteIbcTimeout))}
               </InputThemedText>
             ) : (
-              <p className="italic text-text-interactive-error">
+              <p className="text-text-interactive-error italic">
                 {t('error.loadingData')}
               </p>
             )}
           </div>
+
+          {selectedToken &&
+            !ibcAmountOut.loading &&
+            !ibcAmountOut.errored &&
+            ibcAmountOut.data &&
+            ibcAmountOut.data !== spendAmount && (
+              <div className="flex flex-col gap-2 mt-1">
+                <InputLabel name={t('form.amountReceived')} />
+
+                <TokenAmountDisplay
+                  amount={ibcAmountOut.data}
+                  decimals={selectedToken.token.decimals}
+                  iconUrl={selectedToken.token.imageUrl}
+                  showFullAmount
+                  symbol={selectedToken.token.symbol}
+                />
+              </div>
+            )}
         </div>
       )}
     </>
@@ -789,8 +906,12 @@ const NobleTariff = ({
       ? Math.min(Number((amount * feeDecimal).toFixed(decimals)), maxFee)
       : 0
 
+  if (fee === 0) {
+    return null
+  }
+
   return (
-    <p className="secondary-text max-w-prose text-text-interactive-warning-body">
+    <p className="secondary-text text-text-interactive-warning-body max-w-prose">
       {t('info.nobleTariffApplied', {
         feePercent: formatPercentOf100(feeDecimal * 100),
         tokenSymbol: symbol,

@@ -1,12 +1,9 @@
 import { ComponentMeta, ComponentStory } from '@storybook/react'
 
-import { ProposalLine } from '@dao-dao/stateful'
+import { DaoCard } from '@dao-dao/stateful'
 import { makeDappLayoutDecorator } from '@dao-dao/storybook/decorators'
 
-import { DaoCard, LinkWrapper } from '../components'
 import { FeaturedDaos as FeaturedDaosScrollerStory } from '../components/HorizontalScroller.stories'
-import { DefaultArgs as NavigationStoryArgs } from '../components/layout/DappNavigation.stories'
-import { makeProps as makeProposalLineProps } from '../components/proposal/ProposalLine.stories'
 import { Home } from './Home'
 
 export default {
@@ -16,91 +13,45 @@ export default {
 
 const Template: ComponentStory<typeof Home> = (args) => <Home {...args} />
 
-export const Connected = Template.bind({})
-Connected.args = {
-  featuredDaosProps: {
-    items: FeaturedDaosScrollerStory.args!.items!,
-    Component: (props) => (
-      <DaoCard
-        {...props}
-        LinkWrapper={LinkWrapper}
-        follow={{
-          following: true,
-          updatingFollowing: false,
-          onFollow: () => alert('follow ' + props.coreAddress),
-        }}
-      />
-    ),
-  },
-  connected: true,
-  followingDaosProps: {
-    followingDaos: FeaturedDaosScrollerStory.args!.items!,
-    DaoCard: (props) => (
-      <DaoCard
-        {...props}
-        LinkWrapper={LinkWrapper}
-        follow={{
-          following: true,
-          updatingFollowing: false,
-          onFollow: () => alert('follow ' + props.coreAddress),
-        }}
-      />
-    ),
-    openSearch: () => alert('search'),
-  },
-  feedProps: {
-    state: {
-      loading: false,
-      refreshing: false,
-      daosWithItems: NavigationStoryArgs.followingDaos.loading
-        ? []
-        : NavigationStoryArgs.followingDaos.data.map((dao) => ({
-            dao,
-            // Generate between 1 and 3 proposals.
-            items: [...Array(Math.floor(Math.random() * 3) + 1)].map(() => {
-              // Random time in the next 3 days.
-              const secondsRemaining = Math.floor(
-                Math.random() * 3 * 24 * 60 * 60
-              )
-
-              return {
-                Renderer: ProposalLine,
-                props: makeProposalLineProps(secondsRemaining),
-                pending: true,
-              }
-            }),
-          })),
-      pendingItemCount: 42,
-      totalItemCount: 100,
-      refresh: () => {},
+export const Default = Template.bind({})
+Default.args = {
+  stats: {
+    all: {
+      daos: 1234,
+      proposals: 5678,
+      votes: 90123,
+      uniqueVoters: 4567,
     },
-    LinkWrapper,
+    month: {
+      daos: 234,
+      proposals: 678,
+      votes: 9123,
+      uniqueVoters: 567,
+    },
+    week: {
+      daos: 34,
+      proposals: 78,
+      votes: 123,
+      uniqueVoters: 67,
+    },
+    chains: 10,
+    tvl: 1234567890,
   },
+  DaoCard,
+  chainGovDaos: FeaturedDaosScrollerStory.args!.items!,
+  featuredDaos: FeaturedDaosScrollerStory.args!.items!,
+  openSearch: () => alert('search'),
 }
-Connected.parameters = {
+Default.parameters = {
   design: {
     type: 'figma',
-    url: 'https://www.figma.com/file/ZnQ4SMv8UUgKDZsR5YjVGH/DAO-DAO-2.0?node-id=272%3A64674',
+    url: 'https://www.figma.com/file/ZnQ4SMv8UUgKDZsR5YjVGH/DAO-DAO-2.0?node-id=272%3A64768',
   },
   nextRouter: {
     asPath: '/',
   },
 }
-Connected.decorators = [makeDappLayoutDecorator()]
-
-export const Disconnected = Template.bind({})
-Disconnected.args = {
-  ...Connected.args,
-  connected: false,
-}
-Disconnected.parameters = {
-  ...Connected.parameters,
-  design: {
-    type: 'figma',
-    url: 'https://www.figma.com/file/ZnQ4SMv8UUgKDZsR5YjVGH/DAO-DAO-2.0?node-id=272%3A64768',
-  },
-}
-Disconnected.decorators = [
+Default.decorators = [
   makeDappLayoutDecorator({
     navigationProps: {
       walletConnected: false,

@@ -1,19 +1,28 @@
 import { useTranslation } from 'react-i18next'
-import { waitForAll } from 'recoil'
+import { useRecoilValue, waitForAllSettled } from 'recoil'
 
-import { searchDaosSelector } from '@dao-dao/state/recoil'
-import { useCachedLoadable } from '@dao-dao/stateless'
+import { navigatingToHrefAtom, searchDaosSelector } from '@dao-dao/state/recoil'
+import { useCachedLoadable, useDaoNavHelpers } from '@dao-dao/stateless'
 import {
   CommandModalContextSection,
   CommandModalContextSectionItem,
   CommandModalContextUseSectionsOptions,
   CommandModalDaoInfo,
+  ContractVersion,
 } from '@dao-dao/types'
-import { getFallbackImage, getSupportedChains } from '@dao-dao/utils'
+import {
+  getConfiguredChains,
+  getDisplayNameForChainId,
+  getFallbackImage,
+  getImageUrlForChainId,
+  getSupportedChains,
+  mustGetConfiguredChainConfig,
+  parseContractVersion,
+} from '@dao-dao/utils'
 
 import {
-  useLoadingFeaturedDaoCardInfos,
-  useLoadingFollowingDaoCardInfos,
+  useLoadingFeaturedDaoCards,
+  useLoadingFollowingDaos,
 } from '../../hooks'
 
 export interface UseFilteredDaosSectionOptions {
@@ -31,13 +40,14 @@ export const useFollowingAndFilteredDaosSections = ({
 }: UseFilteredDaosSectionOptions): CommandModalContextSection[] => {
   const { t } = useTranslation()
 
-  const chains = getSupportedChains()
-  const featuredDaosLoading = useLoadingFeaturedDaoCardInfos()
-  const followingDaosLoading = useLoadingFollowingDaoCardInfos()
+  const chains = getSupportedChains({ hasIndexer: true })
+  const featuredDaosLoading = useLoadingFeaturedDaoCards()
+  const followingDaosLoading = useLoadingFollowingDaos()
+  const { getDaoPath } = useDaoNavHelpers()
 
   const queryResults = useCachedLoadable(
     options.filter
-      ? waitForAll(
+      ? waitForAllSettled(
           chains.map(({ chain }) =>
             searchDaosSelector({
               chainId: chain.chain_id,
@@ -56,36 +66,79 @@ export const useFollowingAndFilteredDaosSections = ({
       : undefined
   )
 
+  const navigatingToHref = useRecoilValue(navigatingToHrefAtom)
+
   // Use query results if filter is present.
-  const daos = options.filter
-    ? (queryResults.state !== 'hasValue' ? [] : queryResults.contents.flat())
-        .filter(({ value }) => !!value?.config)
-        .map(
-          ({
-            chainId,
-            id: coreAddress,
-            value: {
-              config: { name, image_url },
-              proposalCount,
-            },
-          }): CommandModalContextSectionItem<CommandModalDaoInfo> => ({
-            chainId,
-            coreAddress,
-            name,
-            imageUrl: image_url || getFallbackImage(coreAddress),
-            // If DAO has no proposals, make it less visible and give it a
-            // tooltip to indicate that it may not be active.
-            ...(proposalCount === 0 && {
-              className: 'opacity-50',
-              tooltip: t('info.inactiveDaoTooltip'),
-              sortLast: true,
-            }),
-          })
+  const daos = [
+    ...(options.filter
+      ? (queryResults.state !== 'hasValue'
+          ? []
+          : queryResults.contents.flatMap((l) => l.valueMaybe() || [])
         )
-    : // Otherwise when filter is empty, display featured DAOs.
-    featuredDaosLoading.loading
-    ? []
-    : featuredDaosLoading.data
+          .filter(({ value }) => !!value?.config)
+          .map(
+            ({
+              chainId,
+              id: coreAddress,
+              value: {
+                config: { name, image_url },
+                version,
+                proposalCount,
+              },
+            }): CommandModalContextSectionItem<CommandModalDaoInfo> => ({
+              chainId,
+              coreAddress,
+              coreVersion: parseContractVersion(version.version),
+              name,
+              imageUrl: image_url || getFallbackImage(coreAddress),
+              // If DAO has no proposals, make it less visible and give it a
+              // tooltip to indicate that it may not be active.
+              ...(proposalCount === 0 && {
+                className: 'opacity-50',
+                tooltip: t('info.inactiveDaoTooltip'),
+                sortLast: true,
+              }),
+              loading: navigatingToHref === getDaoPath(coreAddress),
+            })
+          )
+      : // Otherwise when filter is empty, display featured DAOs.
+      featuredDaosLoading.loading
+      ? []
+      : featuredDaosLoading.data.map((d) => d.info)),
+    // Add configured chains.
+    ...getConfiguredChains().flatMap(
+      ({
+        chainId,
+        noGov,
+      }): CommandModalContextSectionItem<CommandModalDaoInfo> | [] => {
+        if (noGov) {
+          return []
+        }
+
+        const chainName = mustGetConfiguredChainConfig(chainId).name
+        // Ignore chain if followed since they show up in a separate section.
+        if (
+          !followingDaosLoading.loading &&
+          followingDaosLoading.data.some(
+            (following) =>
+              following.chainId === chainId &&
+              following.coreVersion === ContractVersion.Gov
+          )
+        ) {
+          return []
+        }
+
+        return {
+          chainId,
+          coreAddress: chainName,
+          coreVersion: ContractVersion.Gov,
+          name: getDisplayNameForChainId(chainId),
+          imageUrl: getImageUrlForChainId(chainId),
+          loading: navigatingToHref === getDaoPath(chainName),
+        }
+      }
+    ),
+  ]
 
   // When filter present, use search results. Otherwise use featured DAOs.
   const daosLoading = options.filter

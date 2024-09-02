@@ -2,8 +2,8 @@ import { ComponentMeta, ComponentStory } from '@storybook/react'
 
 import { CHAIN_ID, ReactHookFormDecorator } from '@dao-dao/storybook'
 import { GovProposalVersion } from '@dao-dao/types'
-import { SoftwareUpgradeProposal } from '@dao-dao/utils/protobuf/codegen/cosmos/upgrade/v1beta1/upgrade'
-import { Any } from '@dao-dao/utils/protobuf/codegen/google/protobuf/any'
+import { SoftwareUpgradeProposal } from '@dao-dao/types/protobuf/codegen/cosmos/upgrade/v1beta1/upgrade'
+import { Any } from '@dao-dao/types/protobuf/codegen/google/protobuf/any'
 
 import {
   GovProposalActionDisplay,
@@ -35,6 +35,7 @@ Default.args = {
     title: 'Upgrade to v10 Alpha 1',
     description:
       'Full details on the testnets github. Target binary is v10.0.0-alpha.2',
+    metadata: '',
     deposit: [
       {
         amount: 100,
@@ -74,6 +75,7 @@ Default.args = {
   options: {
     supportsV1GovProposals: true,
     minDeposits: { loading: false, data: [] },
+    communityPoolBalances: { loading: false, data: [] },
     TokenAmountDisplay,
     AddressInput,
     GovProposalActionDisplay,

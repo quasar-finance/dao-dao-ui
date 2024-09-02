@@ -1,9 +1,11 @@
 import { Chain } from '@chain-registry/types'
+import { QueryClient } from '@tanstack/react-query'
 import { CSSProperties, ComponentType, ReactNode } from 'react'
 import { FieldPath, FieldValues } from 'react-hook-form'
 import { RecoilValueReadOnly } from 'recoil'
 
 import { Action, ActionCategoryMaker, ActionMaker } from './actions'
+import { IProposalModuleBase } from './clients'
 import {
   DaoInfoCard,
   LinkWrapperProps,
@@ -26,9 +28,8 @@ import {
   ProposalModule,
 } from './dao'
 import { ContractVersion } from './features'
-import { ProposalTimestampInfo } from './gov'
 import { LoadingData } from './misc'
-import { ProposalCreatedCardProps } from './proposal'
+import { ProposalCreatedCardProps, ProposalTimestampInfo } from './proposal'
 
 export type IProposalModuleAdapterCommon<FormData extends FieldValues = any> = {
   // Fields
@@ -97,7 +98,7 @@ export type IProposalModuleAdapter<Vote extends unknown = any> = {
     ProposalVoter: ComponentType<BaseProposalVoterProps>
     ProposalInnerContentDisplay: ComponentType<BaseProposalInnerContentDisplayProps>
     ProposalWalletVote: ComponentType<BaseProposalWalletVoteProps<Vote>>
-    ProposalVotes: ComponentType
+    ProposalVotes: ComponentType<BaseProposalVotesProps>
     ProposalVoteTally: ComponentType
     ProposalLine: ComponentType<BaseProposalLineProps>
 
@@ -147,25 +148,38 @@ export type ProposalModuleAdapter<
 }
 
 export type IProposalModuleAdapterCommonOptions = {
-  chain: Chain
-  coreAddress: string
-  proposalModule: ProposalModule
+  proposalModule: IProposalModuleBase
 }
 
-export type IProposalModuleAdapterCommonInitialOptions = Omit<
-  IProposalModuleAdapterCommonOptions,
-  'proposalModule'
->
-
 export type IProposalModuleAdapterOptions = {
+  /**
+   * The DAO's native chain.
+   */
   chain: Chain
+  /**
+   * The DAO's core contract address.
+   */
   coreAddress: string
+  /**
+   * The proposal module.
+   */
   proposalModule: ProposalModule
+  /**
+   * The proposal ID unique across all proposal modules. They include the
+   * proposal module's prefix, the proposal number within the proposal module,
+   * and potentially an asterisk in the middle to indicate a
+   * pre-propose-approval proposal.
+   */
   proposalId: string
+  /**
+   * The proposal number used by the proposal module to identify this proposal.
+   */
   proposalNumber: number
-  // Whether or not this refers to a pre-propose-approval proposal. If this is
-  // true, the proposal ID should contain an asterisk (*) between the proposal
-  // module prefix and proposal number.
+  /**
+   * Whether or not this refers to a pre-propose-approval proposal. If this is
+   * true, the proposal ID should contain an asterisk (*) between the proposal
+   * module prefix and proposal number.
+   */
   isPreProposeApprovalProposal: boolean
 }
 
@@ -186,6 +200,7 @@ export type IProposalModuleContext = {
   options: IProposalModuleAdapterOptions
   adapter: IProposalModuleAdapter
   common: IProposalModuleAdapterCommon
+  proposalModule: IProposalModuleBase
 }
 
 /**
@@ -202,6 +217,7 @@ export type IProposalModuleCommonContext = {
 // Internal Adapter Types
 
 export type FetchPreProposeFunction = (
+  queryClient: QueryClient,
   chainId: string,
   proposalModuleAddress: string,
   version: ContractVersion | null
@@ -258,11 +274,11 @@ export type CommonProposalInfo = {
 
 export type BaseProposalStatusAndInfoProps = {
   inline?: boolean
-  // Open self-relay modal to execute a proposal and relay polytone IBC packets.
+  // Open self-relay modal to execute a proposal and relay IBC packets.
   openSelfRelayExecute: (
     props: Pick<
       SelfRelayExecuteModalProps,
-      'uniqueId' | 'chainIds' | 'transaction'
+      'uniqueId' | 'chainIds' | 'crossChainPackets' | 'transaction'
     >
   ) => void
   onExecuteSuccess: () => void | Promise<void>
@@ -275,6 +291,13 @@ export type BaseProposalStatusAndInfoProps = {
 export type BaseProposalVoterProps = {
   onVoteSuccess: () => void | Promise<void>
 } & Pick<ProposalVoterProps, 'seenAllActionPages'>
+
+export type BaseProposalVotesProps = {
+  /**
+   * An optional class name.
+   */
+  className?: string
+}
 
 export type BasePreProposeProposalStatusAndInfoProps = Pick<
   BaseProposalStatusAndInfoProps,
@@ -302,6 +325,7 @@ export type BaseProposalWalletVoteProps<T> = {
 
 export type BaseProposalLineProps = {
   href: string
+  onClick?: () => void
   LinkWrapper: ComponentType<LinkWrapperProps>
 }
 
@@ -334,6 +358,7 @@ export type WalletVoteInfo<T> = {
 }
 
 export type ProposalRefreshers = {
+  refreshProposalId: number
   refreshProposal: () => void
   refreshProposalAndAll: () => void
   refreshing: boolean

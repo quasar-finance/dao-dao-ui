@@ -1,8 +1,14 @@
-import { ReactNode, useMemo } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { waitForAll } from 'recoil'
 
-import { govParamsSelector, moduleAddressSelector } from '@dao-dao/state/recoil'
+import { accountQueries } from '@dao-dao/state/query'
+import {
+  accountsSelector,
+  govParamsSelector,
+  moduleAddressSelector,
+} from '@dao-dao/state/recoil'
 import {
   ErrorPage,
   Loader,
@@ -10,7 +16,7 @@ import {
   useCachedLoadingWithError,
   useChain,
   useChainContext,
-  useDaoInfoContext,
+  useDaoContext,
   useSupportedChainContext,
 } from '@dao-dao/stateless'
 import {
@@ -19,9 +25,14 @@ import {
   ActionContext,
   ActionContextType,
   ActionOptions,
+  ActionsProviderProps,
+  ChainId,
+  GovActionsProviderProps,
   IActionsContext,
+  WalletActionsProviderProps,
 } from '@dao-dao/types'
 
+import { useProfile, useQueryLoadingDataWithError } from '../../hooks'
 import { useWallet } from '../../hooks/useWallet'
 import { matchAndLoadCommon } from '../../proposal-module-adapter'
 import { useVotingModuleAdapter } from '../../voting-module-adapter'
@@ -32,29 +43,13 @@ import {
 } from '../core'
 import { ActionsContext } from './context'
 
-export type ActionsProviderProps = {
-  children: ReactNode | ReactNode[]
-}
-
-export type WalletActionsProviderProps = ActionsProviderProps & {
-  // If passed, will override the connected wallet address.
-  address?: string
-}
-
-export type GovActionsProviderProps = ActionsProviderProps & {
-  /**
-   * Optionally override loader node.
-   */
-  loader?: ReactNode
-}
-
 // Make sure this re-renders when the options change. You can do this by setting
 // a `key` on this component or one of its ancestors. See DaoPageWrapper.tsx
 // where this component is used for a usage example.
 export const DaoActionsProvider = ({ children }: ActionsProviderProps) => {
   const { t } = useTranslation()
   const chainContext = useSupportedChainContext()
-  const info = useDaoInfoContext()
+  const { dao } = useDaoContext()
 
   const options: ActionOptions = {
     t,
@@ -63,10 +58,11 @@ export const DaoActionsProvider = ({ children }: ActionsProviderProps) => {
       type: ActionChainContextType.Supported,
       ...chainContext,
     },
-    address: info.coreAddress,
+    address: dao.coreAddress,
     context: {
       type: ActionContextType.Dao,
-      info,
+      dao,
+      accounts: dao.info.accounts,
     },
   }
 
@@ -89,14 +85,12 @@ export const DaoActionsProvider = ({ children }: ActionsProviderProps) => {
   // Get all actions for all proposal module adapters.
   const proposalModuleActionCategoryMakers = useMemo(
     () =>
-      info.proposalModules.flatMap(
+      dao.info.proposalModules.flatMap(
         (proposalModule) =>
-          matchAndLoadCommon(proposalModule, {
-            chain: chainContext.chain,
-            coreAddress: info.coreAddress,
-          }).fields.actionCategoryMakers || []
+          matchAndLoadCommon(dao, proposalModule.address).fields
+            .actionCategoryMakers || []
       ),
-    [chainContext.chain, info.coreAddress, info.proposalModules]
+    [dao]
   )
 
   const loadingWidgets = useWidgets()
@@ -196,19 +190,34 @@ export const WalletActionsProvider = ({
   address: overrideAddress,
   children,
 }: WalletActionsProviderProps) => {
-  const { address: connectedAddress } = useWallet()
+  const { address: connectedAddress, chain } = useWallet()
 
-  const address = overrideAddress || connectedAddress
+  const address =
+    overrideAddress === undefined ? connectedAddress : overrideAddress
 
-  if (!address) {
-    return <Loader />
-  }
+  const { profile } = useProfile({ address })
 
-  return (
+  const queryClient = useQueryClient()
+  const accounts = useQueryLoadingDataWithError(
+    address
+      ? accountQueries.list(queryClient, {
+          chainId: chain.chain_id,
+          address,
+        })
+      : undefined
+  )
+
+  return address === undefined || profile.loading || accounts.loading ? (
+    <Loader />
+  ) : accounts.errored ? (
+    <ErrorPage error={accounts.error} />
+  ) : (
     <BaseActionsProvider
       address={address}
       context={{
         type: ActionContextType.Wallet,
+        profile: profile.data,
+        accounts: accounts.data,
       }}
     >
       {children}
@@ -233,16 +242,32 @@ export const GovActionsProvider = ({
     ])
   )
 
-  return govDataLoading.loading ? (
+  const accounts = useCachedLoadingWithError(
+    govDataLoading.loading || govDataLoading.errored
+      ? undefined
+      : accountsSelector({
+          chainId,
+          address: govDataLoading.data[0],
+          // Make sure to load ICAs for Neutron so Valence accounts load.
+          includeIcaChains: [ChainId.NeutronMainnet],
+        })
+  )
+
+  return govDataLoading.loading ||
+    (accounts.loading && !govDataLoading.errored) ? (
     <>{loader || <PageLoader />}</>
   ) : govDataLoading.errored ? (
     <ErrorPage error={govDataLoading.error} />
+  ) : accounts.errored ? (
+    <ErrorPage error={accounts.error} />
   ) : (
     <BaseActionsProvider
       address={govDataLoading.data[0]}
       context={{
         type: ActionContextType.Gov,
         params: govDataLoading.data[1],
+        // Type-check. Will never be loading here.
+        accounts: accounts.loading ? [] : accounts.data,
       }}
     >
       {children}

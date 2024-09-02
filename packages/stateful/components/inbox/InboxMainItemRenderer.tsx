@@ -3,7 +3,7 @@ import clsx from 'clsx'
 import { ComponentType, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { IconButton, Tooltip, WarningCard } from '@dao-dao/stateless'
+import { IconButton, Loader, StatusCard, Tooltip } from '@dao-dao/stateless'
 import {
   InboxItemRendererProps,
   InboxItemType,
@@ -11,6 +11,7 @@ import {
 } from '@dao-dao/types'
 
 import { useInboxApi } from '../../hooks'
+import { SuspenseLoader } from '../SuspenseLoader'
 import { JoinedDaoRenderer, ProposalRenderer } from './renderers'
 
 export const InboxMainItemRenderer = ({
@@ -21,7 +22,7 @@ export const InboxMainItemRenderer = ({
 }: InboxMainItemRendererProps) => {
   const { t } = useTranslation()
   const { clear: _clear } = useInboxApi()
-  const clear = useCallback(() => _clear(item.id), [_clear, item.id])
+  const clear = useCallback(() => _clear([item]), [_clear, item])
 
   const Renderer = ITEM_RENDERER_MAP[item.type]
 
@@ -29,11 +30,18 @@ export const InboxMainItemRenderer = ({
     <div
       className={clsx('relative transition-opacity', checked && 'opacity-30')}
     >
-      <Renderer clear={clear} compact={compact} data={item.data} item={item} />
+      <SuspenseLoader fallback={<Loader />}>
+        <Renderer
+          clear={clear}
+          compact={compact}
+          data={item.data}
+          item={item}
+        />
+      </SuspenseLoader>
 
       <div
         className="absolute top-0 bottom-0 right-4 flex flex-row items-center"
-        onClick={() => onCheck(item.id)}
+        onClick={() => onCheck(item)}
       >
         <Tooltip
           title={
@@ -46,7 +54,7 @@ export const InboxMainItemRenderer = ({
             Icon={checked ? RemoveSharp : CloseSharp}
             onClick={(e) => {
               e.stopPropagation()
-              onCheck(item.id)
+              onCheck(item)
             }}
             size="sm"
             variant="ghost"
@@ -55,11 +63,12 @@ export const InboxMainItemRenderer = ({
       </div>
     </div>
   ) : (
-    <WarningCard content={t('error.unknownInboxType')} />
+    <StatusCard content={t('error.unknownInboxType')} style="warning" />
   )
 }
 
-// TODO: combine these into standard shape, with optional extra buttons
+// TODO(inbox): combine these into standard shape, with optional extra buttons.
+// also add generic fallback with clear button
 const ITEM_RENDERER_MAP: Partial<
   Record<InboxItemType, ComponentType<InboxItemRendererProps<any>>>
 > = {

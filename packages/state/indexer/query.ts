@@ -3,12 +3,7 @@ import {
   IndexerUpStatus,
   WithChainId,
 } from '@dao-dao/types'
-import {
-  BatchClient,
-  CommonError,
-  INDEXER_URL,
-  getSupportedChainConfig,
-} from '@dao-dao/utils'
+import { CommonError, INDEXER_URL, chainIsIndexed } from '@dao-dao/utils'
 
 export type QueryIndexerOptions = WithChainId<
   {
@@ -36,8 +31,6 @@ export type QueryIndexerOptions = WithChainId<
   )
 >
 
-const indexerBatchClient = new BatchClient(INDEXER_URL + '/batch')
-
 export const queryIndexer = async <T = any>({
   type,
   address = '_',
@@ -47,9 +40,7 @@ export const queryIndexer = async <T = any>({
   times,
   chainId,
 }: QueryIndexerOptions): Promise<T | undefined> => {
-  // Only supported chains have an indexer.
-  const chainConfig = getSupportedChainConfig(chainId)
-  if (!chainConfig || chainConfig.noIndexer) {
+  if (!chainIsIndexed(chainId)) {
     throw new Error(CommonError.NoIndexerForChain)
   }
 
@@ -78,18 +69,23 @@ export const queryIndexer = async <T = any>({
     }),
   })
 
-  const url = `/${chainId}/${type}/${address}/${formula}?${params.toString()}`
-  const { status, body } = await indexerBatchClient.execute({
-    url,
+  const path = `/${chainId}/${type}/${address}/${formula}?${params.toString()}`
+  const response = await fetch(INDEXER_URL + path, {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+    },
   })
 
-  if (status >= 300) {
+  const body = await response.text()
+
+  if (response.status >= 300) {
     throw new Error(
-      `Error querying indexer for ${type}/${address}/${formula}: ${status} ${body}`.trim()
+      `Error querying indexer for ${path}: ${response.status} ${body}`.trim()
     )
   }
 
-  if (status === 204) {
+  if (response.status === 204) {
     // If no content is returned, return undefined. This will happen if the
     // formula computed succesfully and outputted nothing (undefined or null).
     return undefined
@@ -101,9 +97,7 @@ export const queryIndexer = async <T = any>({
 export const queryIndexerUpStatus = async ({
   chainId,
 }: WithChainId<{}>): Promise<IndexerUpStatus> => {
-  // Only supported chains have an indexer.
-  const chainConfig = getSupportedChainConfig(chainId)
-  if (!chainConfig || chainConfig.noIndexer) {
+  if (!chainIsIndexed(chainId)) {
     throw new Error(CommonError.NoIndexerForChain)
   }
 

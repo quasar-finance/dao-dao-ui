@@ -1,4 +1,3 @@
-import JSON5 from 'json5'
 import { useCallback, useMemo } from 'react'
 
 import { RobotEmoji } from '@dao-dao/stateless'
@@ -9,7 +8,7 @@ import {
   UseDefaults,
   UseTransformToCosmos,
 } from '@dao-dao/types/actions'
-import { makeStargateMessage, makeWasmMessage } from '@dao-dao/utils'
+import { convertJsonToCWCosmosMsg } from '@dao-dao/utils'
 
 import { CustomComponent as Component, CustomData } from './Component'
 
@@ -18,27 +17,7 @@ const useDefaults: UseDefaults<CustomData> = () => ({
 })
 
 const useTransformToCosmos: UseTransformToCosmos<CustomData> = () =>
-  useCallback((data: CustomData) => {
-    let msg
-    try {
-      msg = JSON5.parse(data.message)
-    } catch (err) {
-      console.error(
-        `internal error. unparsable message: (${data.message})`,
-        err
-      )
-      return
-    }
-    // Convert the wasm message component to base64
-    if (msg.wasm) {
-      msg = makeWasmMessage(msg)
-    }
-    // Encode the stargate message.
-    if (msg.stargate) {
-      msg = makeStargateMessage(msg)
-    }
-    return msg
-  }, [])
+  useCallback((data: CustomData) => convertJsonToCWCosmosMsg(data.message), [])
 
 const useDecodedCosmosMsg: UseDecodedCosmosMsg<CustomData> = (
   msg: Record<string, any>

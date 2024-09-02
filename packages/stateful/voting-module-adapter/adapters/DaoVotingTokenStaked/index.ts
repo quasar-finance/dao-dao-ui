@@ -9,9 +9,11 @@ import {
 import {
   DAO_VOTING_TOKEN_STAKED_CONTRACT_NAMES,
   DaoVotingTokenStakedAdapterId,
+  isSecretNetwork,
 } from '@dao-dao/utils'
 
 import {
+  makeMigrateMigalooV4TokenFactoryAction,
   makeMintAction,
   makeUpdateMinterAllowanceAction,
   makeUpdateStakingConfigAction,
@@ -23,7 +25,7 @@ export const DaoVotingTokenStakedAdapter: VotingModuleAdapter = {
   id: DaoVotingTokenStakedAdapterId,
   contractNames: DAO_VOTING_TOKEN_STAKED_CONTRACT_NAMES,
 
-  load: () => ({
+  load: ({ chainId }) => ({
     // Hooks
     hooks: {
       useMainDaoInfoCards,
@@ -37,20 +39,28 @@ export const DaoVotingTokenStakedAdapter: VotingModuleAdapter = {
       ProfileCardMemberInfo,
       StakingModal,
 
-      extraTabs: [
-        {
-          id: DaoTabId.Members,
-          labelI18nKey: 'title.members',
-          Component: MembersTab,
-          Icon: PeopleAltOutlined,
-          IconFilled: PeopleAltRounded,
-        },
-      ],
+      // Can't view members on Secret Network.
+      extraTabs: isSecretNetwork(chainId)
+        ? undefined
+        : [
+            {
+              id: DaoTabId.Members,
+              labelI18nKey: 'title.members',
+              Component: MembersTab,
+              Icon: PeopleAltOutlined,
+              IconFilled: PeopleAltRounded,
+            },
+          ],
     },
 
     // Functions
     fields: {
       actionCategoryMakers: [
+        () => ({
+          // Add to Commonly Used category.
+          key: ActionCategoryKey.CommonlyUsed,
+          actionMakers: [makeMigrateMigalooV4TokenFactoryAction],
+        }),
         () => ({
           // Add to DAO Governance category.
           key: ActionCategoryKey.DaoGovernance,
@@ -58,6 +68,7 @@ export const DaoVotingTokenStakedAdapter: VotingModuleAdapter = {
             makeMintAction,
             makeUpdateMinterAllowanceAction,
             makeUpdateStakingConfigAction,
+            makeMigrateMigalooV4TokenFactoryAction,
           ],
         }),
       ],

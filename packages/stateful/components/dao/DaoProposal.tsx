@@ -11,6 +11,7 @@ import toast from 'react-hot-toast'
 import { useTranslation } from 'react-i18next'
 
 import {
+  ProposalModuleAdapterBothProviders,
   ProposalModuleAdapterProvider,
   useProposalModuleAdapterContext,
 } from '@dao-dao/stateful/proposal-module-adapter'
@@ -19,6 +20,7 @@ import {
   Proposal,
   ProposalNotFound,
   ProposalProps,
+  ProposalVotesPrivate,
   useDaoInfoContext,
 } from '@dao-dao/stateless'
 import {
@@ -28,12 +30,14 @@ import {
   ProposalStatusEnum,
   SelfRelayExecuteModalProps,
 } from '@dao-dao/types'
+import { isSecretNetwork } from '@dao-dao/utils'
 
 import { useOnCurrentDaoWebSocketMessage, useWallet } from '../../hooks'
+import { useProposalModuleAdapterCommonContext } from '../../proposal-module-adapter/react/context'
 import { PageHeaderContent } from '../PageHeaderContent'
 import { SelfRelayExecuteModal } from '../SelfRelayExecuteModal'
 import { DaoApproverProposalContentDisplay } from './DaoApproverProposalContentDisplay'
-import { DaoProposalPageWrapperProps } from './DaoPageWrapper'
+import { DaoProposalProps } from './DaoPageWrapper'
 import { DaoPreProposeApprovalProposalContentDisplay } from './DaoPreProposeApprovalProposalContentDisplay'
 import { DaoProposalContentDisplay } from './DaoProposalContentDisplay'
 
@@ -43,8 +47,13 @@ interface InnerDaoProposalProps {
 
 const InnerDaoProposal = ({ proposalInfo }: InnerDaoProposalProps) => {
   const { t } = useTranslation()
-  const { coreAddress } = useDaoInfoContext()
+  const daoInfo = useDaoInfoContext()
   const { address } = useWallet()
+
+  const proposalModuleAdapterContext = useProposalModuleAdapterContext()
+  const proposalModuleAdapterCommonContext =
+    useProposalModuleAdapterCommonContext()
+
   const {
     options: { proposalModule, isPreProposeApprovalProposal },
     adapter: {
@@ -57,7 +66,7 @@ const InnerDaoProposal = ({ proposalInfo }: InnerDaoProposalProps) => {
       },
       hooks: { useProposalRefreshers, useLoadingWalletVoteInfo },
     },
-  } = useProposalModuleAdapterContext()
+  } = proposalModuleAdapterContext
 
   const { refreshProposalAndAll } = useProposalRefreshers()
   const loadingWalletVoteInfo = useLoadingWalletVoteInfo()
@@ -128,7 +137,9 @@ const InnerDaoProposal = ({ proposalInfo }: InnerDaoProposalProps) => {
           toast.loading(t('success.proposalExecuted'))
 
           // Manually revalidate DAO static props.
-          await fetch(`/api/revalidate?d=${coreAddress}&p=${proposalInfo.id}`)
+          await fetch(
+            `/api/revalidate?d=${daoInfo.coreAddress}&p=${proposalInfo.id}`
+          )
 
           // Refresh entire app since any DAO config may have changed.
           window.location.reload()
@@ -237,6 +248,7 @@ const InnerDaoProposal = ({ proposalInfo }: InnerDaoProposalProps) => {
             sdaLabel: t('title.proposals'),
           },
           current: `${t('title.proposal')} ${proposalInfo.id}`,
+          daoInfo,
         }}
         rightNode={
           canVote ? (
@@ -256,10 +268,16 @@ const InnerDaoProposal = ({ proposalInfo }: InnerDaoProposalProps) => {
                 },
               }}
             >
-              <ProposalVoter
-                onVoteSuccess={onVoteSuccess}
-                seenAllActionPages={seenAllActionPages}
-              />
+              {/* Voter is rendered in page header outside of the current context, so this needs to be wrapped in another provider. */}
+              <ProposalModuleAdapterBothProviders
+                commonContext={proposalModuleAdapterCommonContext}
+                context={proposalModuleAdapterContext}
+              >
+                <ProposalVoter
+                  onVoteSuccess={onVoteSuccess}
+                  seenAllActionPages={seenAllActionPages}
+                />
+              </ProposalModuleAdapterBothProviders>
             </Popup>
           ) : undefined
         }
@@ -271,6 +289,13 @@ const InnerDaoProposal = ({ proposalInfo }: InnerDaoProposalProps) => {
           PreProposeApprovalProposalStatusAndInfo
             ? PreProposeApprovalProposalStatusAndInfo
             : CachedProposalStatusAndInfo
+        }
+        VotesCast={
+          isPreProposeApprovalProposal
+            ? undefined
+            : isSecretNetwork(daoInfo.chainId)
+            ? ProposalVotesPrivate
+            : ProposalVotes
         }
         contentDisplay={
           proposalModule.prePropose?.type === PreProposeModuleType.Approver ? (
@@ -292,12 +317,12 @@ const InnerDaoProposal = ({ proposalInfo }: InnerDaoProposalProps) => {
         voteTally={
           isPreProposeApprovalProposal ? undefined : <ProposalVoteTally />
         }
-        votesCast={isPreProposeApprovalProposal ? undefined : <ProposalVotes />}
       />
 
       <SelfRelayExecuteModal
         // Placeholders that get overridden when the modal is opened.
         chainIds={[]}
+        crossChainPackets={[]}
         transaction={{
           type: 'execute',
           msgs: [],
@@ -324,24 +349,22 @@ const InnerDaoProposal = ({ proposalInfo }: InnerDaoProposalProps) => {
   )
 }
 
-export const DaoProposal = ({
-  proposalInfo,
-  serializedInfo,
-}: Pick<DaoProposalPageWrapperProps, 'proposalInfo' | 'serializedInfo'>) =>
-  proposalInfo && serializedInfo ? (
+export const DaoProposal = ({ proposalInfo }: DaoProposalProps) => {
+  const { coreAddress } = useDaoInfoContext()
+
+  return proposalInfo ? (
     <ProposalModuleAdapterProvider
       key={
         // Make sure to refresh when the DAO or proposal ID changes. In case we
         // redirect to a proposal in the same DAO, this is necessary to refresh
         // for some reason.
-        serializedInfo.coreAddress + proposalInfo.id
+        coreAddress + proposalInfo.id
       }
-      coreAddress={serializedInfo.coreAddress}
       proposalId={proposalInfo.id}
-      proposalModules={serializedInfo.proposalModules}
     >
       <InnerDaoProposal proposalInfo={proposalInfo} />
     </ProposalModuleAdapterProvider>
   ) : (
     <ProposalNotFound PageHeaderContent={PageHeaderContent} />
   )
+}

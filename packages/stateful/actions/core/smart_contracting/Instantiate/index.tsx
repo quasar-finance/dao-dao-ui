@@ -1,21 +1,18 @@
+import { fromUtf8 } from '@cosmjs/encoding'
 import { Coin } from '@cosmjs/stargate'
 import JSON5 from 'json5'
-import { useCallback } from 'react'
+import { useCallback, useEffect } from 'react'
 import { useFormContext } from 'react-hook-form'
-import { constSelector, waitForAll } from 'recoil'
+import { constSelector } from 'recoil'
 
-import {
-  PolytoneListenerSelectors,
-  genericTokenSelector,
-} from '@dao-dao/state/recoil'
+import { PolytoneListenerSelectors } from '@dao-dao/state/recoil'
 import {
   BabyEmoji,
   ChainProvider,
   DaoSupportedChainPickerInput,
   useCachedLoading,
-  useCachedLoadingWithError,
 } from '@dao-dao/stateless'
-import { PolytoneConnection, TokenType } from '@dao-dao/types'
+import { AccountType, TokenType, makeStargateMessage } from '@dao-dao/types'
 import {
   ActionComponent,
   ActionContextType,
@@ -25,36 +22,39 @@ import {
   UseDefaults,
   UseTransformToCosmos,
 } from '@dao-dao/types/actions'
+import { MsgInstantiateContract as SecretMsgInstantiateContract } from '@dao-dao/types/protobuf/codegen/secret/compute/v1beta1/msg'
 import {
+  bech32AddressToBase64,
   convertDenomToMicroDenomStringWithDecimals,
   convertMicroDenomToDenomWithDecimals,
+  decodeIcaExecuteMsg,
+  decodeJsonFromBase64,
   decodePolytoneExecuteMsg,
-  getChainAddressForActionOptions,
+  encodeJsonToBase64,
+  getAccountAddress,
+  isDecodedStargateMsg,
+  isSecretNetwork,
   makeWasmMessage,
+  maybeMakeIcaExecuteMessage,
   maybeMakePolytoneExecuteMessage,
   objectMatchesStructure,
 } from '@dao-dao/utils'
 
+import { useQueryTokens } from '../../../../hooks'
 import { useExecutedProposalTxLoadable } from '../../../../hooks/useExecutedProposalTxLoadable'
 import { useTokenBalances } from '../../../hooks'
 import { useActionOptions } from '../../../react'
-import { InstantiateComponent as StatelessInstantiateComponent } from './Component'
+import {
+  InstantiateData,
+  InstantiateComponent as StatelessInstantiateComponent,
+} from './Component'
 
-type InstantiateData = {
-  chainId: string
-  admin: string
-  codeId: number
-  label: string
-  message: string
-  funds: { denom: string; amount: number }[]
-
-  // Loaded on transform once created if this is a polytone message.
-  _polytone?: {
-    chainId: string
-    note: PolytoneConnection
-    initiatorMsg: string
-  }
-}
+// Account types that are allowed to instantiate from.
+const ALLOWED_ACCOUNT_TYPES: readonly AccountType[] = [
+  AccountType.Native,
+  AccountType.Polytone,
+  AccountType.Ica,
+]
 
 const Component: ActionComponent = (props) => {
   const options = useActionOptions()
@@ -67,6 +67,27 @@ const Component: ActionComponent = (props) => {
   const { watch, setValue } = useFormContext<InstantiateData>()
   const chainId = watch((props.fieldNamePrefix + 'chainId') as 'chainId')
   const funds = watch((props.fieldNamePrefix + 'funds') as 'funds')
+
+  const sender = watch((props.fieldNamePrefix + 'sender') as 'sender')
+  // If sender is not found in the list of accounts, reset to the first account
+  // on the target chain, or an empty account.
+  useEffect(() => {
+    if (
+      sender &&
+      !context.accounts.some(
+        (a) => a.chainId === chainId && a.address === sender
+      )
+    ) {
+      setValue(
+        (props.fieldNamePrefix + 'sender') as 'sender',
+        getAccountAddress({
+          accounts: context.accounts,
+          chainId,
+          types: ALLOWED_ACCOUNT_TYPES,
+        }) || ''
+      )
+    }
+  }, [chainId, context.accounts, props.fieldNamePrefix, sender, setValue])
 
   // Once created, if this is a polytone message, this will be defined with
   // polytone metadata that can be used to get the instantiated address.
@@ -196,11 +217,19 @@ const Component: ActionComponent = (props) => {
           disabled={!props.isCreating}
           fieldName={props.fieldNamePrefix + 'chainId'}
           onChange={(chainId) => {
-            // Reset funds and update admin when switching chain.
+            // Reset funds and update admin/sender when switching chain.
             setValue((props.fieldNamePrefix + 'funds') as 'funds', [])
+
+            const chainAddress =
+              getAccountAddress({
+                accounts: context.accounts,
+                chainId,
+                types: ALLOWED_ACCOUNT_TYPES,
+              }) || ''
+            setValue((props.fieldNamePrefix + 'admin') as 'admin', chainAddress)
             setValue(
-              (props.fieldNamePrefix + 'admin') as 'admin',
-              getChainAddressForActionOptions(options, chainId) || ''
+              (props.fieldNamePrefix + 'sender') as 'sender',
+              chainAddress
             )
           }}
         />
@@ -210,7 +239,15 @@ const Component: ActionComponent = (props) => {
         <StatelessInstantiateComponent
           {...props}
           options={{
-            nativeBalances,
+            nativeBalances: nativeBalances.loading
+              ? nativeBalances
+              : {
+                  loading: false,
+                  data: nativeBalances.data.filter(
+                    ({ token, owner }) =>
+                      token.chainId === chainId && owner.address === sender
+                  ),
+                },
             instantiatedAddress,
           }}
         />
@@ -219,13 +256,148 @@ const Component: ActionComponent = (props) => {
   )
 }
 
-export const makeInstantiateAction: ActionMaker<InstantiateData> = ({
-  t,
-  address,
-  chain: { chain_id: currentChainId },
-}) => {
+const useDecodedCosmosMsg: UseDecodedCosmosMsg<InstantiateData> = (
+  msg: Record<string, any>
+) => {
+  let {
+    chain: { chain_id: chainId },
+    address: sender,
+    context: { accounts },
+  } = useActionOptions()
+  const decodedPolytone = decodePolytoneExecuteMsg(chainId, msg)
+  if (decodedPolytone.match) {
+    chainId = decodedPolytone.chainId
+    msg = decodedPolytone.msg
+    sender =
+      getAccountAddress({
+        accounts,
+        chainId,
+        types: [AccountType.Polytone],
+      }) || ''
+  } else {
+    const decodedIca = decodeIcaExecuteMsg(chainId, msg)
+    if (decodedIca.match) {
+      chainId = decodedIca.chainId
+      // should never be undefined since we check for 1 message in the decoder
+      msg = decodedIca.msgWithSender?.msg || {}
+      sender = decodedIca.msgWithSender?.sender || ''
+    }
+  }
+
+  const isWasmInstantiateMsg = objectMatchesStructure(msg, {
+    wasm: {
+      instantiate: {
+        code_id: {},
+        label: {},
+        msg: {},
+        funds: {},
+      },
+    },
+  })
+
+  const isSecretInstantiateMsg =
+    isDecodedStargateMsg(msg) &&
+    msg.stargate.typeUrl === SecretMsgInstantiateContract.typeUrl
+
+  const funds: Coin[] | undefined = isWasmInstantiateMsg
+    ? msg.wasm.instantiate.funds
+    : isSecretInstantiateMsg
+    ? msg.stargate.value.initFunds
+    : undefined
+
+  const fundsTokens = useQueryTokens(
+    funds?.map(({ denom }) => ({
+      chainId,
+      type: TokenType.Native,
+      denomOrAddress: denom,
+    }))
+  )
+
+  // Can't match until we have the token info.
+  if (fundsTokens.loading || fundsTokens.errored) {
+    return { match: false }
+  }
+
+  return isWasmInstantiateMsg
+    ? {
+        match: true,
+        data: {
+          chainId,
+          sender,
+          admin: msg.wasm.instantiate.admin ?? '',
+          codeId: msg.wasm.instantiate.code_id,
+          label: msg.wasm.instantiate.label,
+          message: JSON.stringify(msg.wasm.instantiate.msg, null, 2),
+          funds: (msg.wasm.instantiate.funds as Coin[]).map(
+            ({ denom, amount }, index) => ({
+              denom,
+              amount: convertMicroDenomToDenomWithDecimals(
+                amount,
+                fundsTokens.data[index].decimals
+              ),
+              decimals: fundsTokens.data[index].decimals,
+            })
+          ),
+          _polytone: decodedPolytone.match
+            ? {
+                chainId: decodedPolytone.chainId,
+                note: decodedPolytone.polytoneConnection,
+                initiatorMsg: decodedPolytone.initiatorMsg,
+              }
+            : undefined,
+        },
+      }
+    : isSecretInstantiateMsg
+    ? {
+        match: true,
+        data: {
+          chainId,
+          sender,
+          admin: msg.stargate.value.admin ?? '',
+          codeId: Number(msg.stargate.value.codeId),
+          label: msg.stargate.value.label,
+          message: JSON.stringify(
+            decodeJsonFromBase64(fromUtf8(msg.stargate.value.msg), true),
+            null,
+            2
+          ),
+          funds: (msg.stargate.value.initFunds as Coin[]).map(
+            ({ denom, amount }, index) => ({
+              denom,
+              amount: convertMicroDenomToDenomWithDecimals(
+                amount,
+                fundsTokens.data[index].decimals
+              ),
+              decimals: fundsTokens.data[index].decimals,
+            })
+          ),
+          _polytone: decodedPolytone.match
+            ? {
+                chainId: decodedPolytone.chainId,
+                note: decodedPolytone.polytoneConnection,
+                initiatorMsg: decodedPolytone.initiatorMsg,
+              }
+            : undefined,
+        },
+      }
+    : {
+        match: false,
+      }
+}
+
+export const makeInstantiateAction: ActionMaker<InstantiateData> = (
+  options
+) => {
+  const {
+    t,
+    address,
+    chain: { chain_id: currentChainId },
+    context,
+  } = options
+
   const useDefaults: UseDefaults<InstantiateData> = () => ({
     chainId: currentChainId,
+    sender: address,
     admin: address,
     codeId: 0,
     label: '',
@@ -233,13 +405,24 @@ export const makeInstantiateAction: ActionMaker<InstantiateData> = ({
     funds: [],
   })
 
-  const useTransformToCosmos: UseTransformToCosmos<InstantiateData> = () => {
-    const nativeBalances = useTokenBalances({
-      filter: TokenType.Native,
-    })
+  const useTransformToCosmos: UseTransformToCosmos<InstantiateData> = () =>
+    useCallback(
+      ({
+        chainId,
+        sender,
+        admin,
+        codeId,
+        label,
+        message,
+        funds,
+      }: InstantiateData) => {
+        const account = context.accounts.find(
+          (a) => a.chainId === chainId && a.address === sender
+        )
+        if (!account) {
+          throw new Error('Instantiator account not found')
+        }
 
-    return useCallback(
-      ({ chainId, admin, codeId, label, message, funds }: InstantiateData) => {
         let msg
         try {
           msg = JSON5.parse(message)
@@ -248,122 +431,62 @@ export const makeInstantiateAction: ActionMaker<InstantiateData> = ({
           return
         }
 
-        const fundsTokens = funds.map(({ denom }) =>
-          nativeBalances.loading
-            ? undefined
-            : nativeBalances.data.find(
-                ({ token }) =>
-                  token.chainId === chainId && token.denomOrAddress === denom
-              )?.token
-        )
-        const nonexistentFundsDenom = funds.find(
-          (_, index) => !fundsTokens[index]
-        )?.denom
-        if (nonexistentFundsDenom) {
-          throw new Error(
-            t('error.unknownDenom', {
-              denom: nonexistentFundsDenom,
-            })
-          )
-        }
-
-        return maybeMakePolytoneExecuteMessage(
-          currentChainId,
-          chainId,
-          makeWasmMessage({
-            wasm: {
-              instantiate: {
-                admin: admin || null,
-                code_id: codeId,
-                funds: funds.map(({ denom, amount }, index) => ({
-                  denom,
-                  amount: convertDenomToMicroDenomStringWithDecimals(
-                    amount,
-                    fundsTokens[index]!.decimals
-                  ),
-                })),
-                label,
-                msg,
-              },
-            },
-          })
-        )
-      },
-      [nativeBalances]
-    )
-  }
-
-  const useDecodedCosmosMsg: UseDecodedCosmosMsg<InstantiateData> = (
-    msg: Record<string, any>
-  ) => {
-    let chainId = currentChainId
-    const decodedPolytone = decodePolytoneExecuteMsg(chainId, msg)
-    if (decodedPolytone.match) {
-      chainId = decodedPolytone.chainId
-      msg = decodedPolytone.msg
-    }
-
-    const isInstantiateMsg = objectMatchesStructure(msg, {
-      wasm: {
-        instantiate: {
-          code_id: {},
-          label: {},
-          msg: {},
-          funds: {},
-        },
-      },
-    })
-
-    const fundTokens = useCachedLoadingWithError(
-      isInstantiateMsg
-        ? waitForAll(
-            (msg.wasm.instantiate.funds as Coin[]).map(({ denom }) =>
-              genericTokenSelector({
-                chainId,
-                type: TokenType.Native,
-                denomOrAddress: denom,
-              })
-            )
-          )
-        : undefined
-    )
-
-    // Can't match until we have the token info.
-    if (fundTokens.loading || fundTokens.errored) {
-      return { match: false }
-    }
-
-    return isInstantiateMsg
-      ? {
-          match: true,
-          data: {
-            chainId,
-            admin: msg.wasm.instantiate.admin ?? '',
-            codeId: msg.wasm.instantiate.code_id,
-            label: msg.wasm.instantiate.label,
-            message: JSON.stringify(msg.wasm.instantiate.msg, undefined, 2),
-            funds: (msg.wasm.instantiate.funds as Coin[]).map(
-              ({ denom, amount }, index) => ({
-                denom,
-                amount: convertMicroDenomToDenomWithDecimals(
-                  amount,
-                  fundTokens.data[index].decimals
-                ),
-              })
+        const convertedFunds = funds
+          .map(({ denom, amount, decimals }) => ({
+            denom,
+            amount: convertDenomToMicroDenomStringWithDecimals(
+              amount,
+              decimals
             ),
-            _polytone: decodedPolytone.match
-              ? {
-                  chainId: decodedPolytone.chainId,
-                  note: decodedPolytone.polytoneConnection,
-                  initiatorMsg: decodedPolytone.initiatorMsg,
-                }
-              : undefined,
-          },
-        }
-      : {
-          match: false,
-        }
-  }
+          }))
+          // Neutron errors with `invalid coins` if the funds list is not
+          // alphabetized.
+          .sort((a, b) => a.denom.localeCompare(b.denom))
+
+        const instantiateMsg = isSecretNetwork(chainId)
+          ? makeStargateMessage({
+              stargate: {
+                typeUrl: SecretMsgInstantiateContract.typeUrl,
+                value: SecretMsgInstantiateContract.fromAmino({
+                  sender: bech32AddressToBase64(sender),
+                  admin: admin || '',
+                  code_id: BigInt(codeId).toString(),
+                  init_funds: convertedFunds,
+                  label,
+                  init_msg: encodeJsonToBase64(msg),
+                }),
+              },
+            })
+          : makeWasmMessage({
+              wasm: {
+                instantiate: {
+                  admin: admin || '',
+                  code_id: codeId,
+                  funds: convertedFunds,
+                  label,
+                  msg,
+                },
+              },
+            })
+
+        return account.type === AccountType.Polytone
+          ? maybeMakePolytoneExecuteMessage(
+              currentChainId,
+              account.chainId,
+              instantiateMsg
+            )
+          : account.type === AccountType.Ica
+          ? maybeMakeIcaExecuteMessage(
+              currentChainId,
+              account.chainId,
+              address,
+              account.address,
+              instantiateMsg
+            )
+          : instantiateMsg
+      },
+      []
+    )
 
   return {
     key: ActionKey.Instantiate,

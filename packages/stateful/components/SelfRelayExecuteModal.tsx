@@ -1,5 +1,6 @@
 import { Chain } from '@chain-registry/types'
 import { AckWithMetadata } from '@confio/relayer'
+import { PacketWithMetadata } from '@confio/relayer/build/lib/endpoint'
 import { IbcClient } from '@confio/relayer/build/lib/ibcclient'
 import { Link } from '@confio/relayer/build/lib/link'
 import {
@@ -9,15 +10,15 @@ import {
 import { toHex } from '@cosmjs/encoding'
 import { DirectSecp256k1HdWallet, EncodeObject } from '@cosmjs/proto-signing'
 import {
-  GasPrice,
   IndexedTx,
   SigningStargateClient,
   calculateFee,
   coins,
   fromTendermintEvent,
 } from '@cosmjs/stargate'
-import { useChains } from '@cosmos-kit/react-lite'
+import { ChainWalletBase } from '@cosmos-kit/core'
 import { Check, Close, Send, Verified } from '@mui/icons-material'
+import { useQueryClient } from '@tanstack/react-query'
 import { MsgGrant as MsgGrantEncoder } from 'cosmjs-types/cosmos/authz/v1beta1/tx'
 import uniq from 'lodash.uniq'
 import { Fragment, useEffect, useState } from 'react'
@@ -26,13 +27,15 @@ import { useTranslation } from 'react-i18next'
 import { useRecoilCallback, waitForAll } from 'recoil'
 import { useDeepCompareMemoize } from 'use-deep-compare-effect'
 
+import { tokenQueries } from '@dao-dao/state/query'
 import {
   genericTokenBalanceSelector,
   nativeDenomBalanceSelector,
+  refreshIbcDataAtom,
   refreshPolytoneListenerResultsAtom,
-  refreshUnreceivedIbcDataAtom,
   refreshWalletBalancesIdAtom,
 } from '@dao-dao/state/recoil'
+import { DynamicGasPrice } from '@dao-dao/state/utils'
 import {
   Button,
   FlyingAnimation,
@@ -43,29 +46,32 @@ import {
   Tooltip,
   useCachedLoadingWithError,
   useSupportedChainContext,
+  useUpdatingRef,
 } from '@dao-dao/stateless'
 import {
   ChainId,
-  PolytoneConnection,
+  GenericToken,
   SelfRelayExecuteModalProps,
   TokenType,
+  cwMsgToEncodeObject,
 } from '@dao-dao/types'
+import { MsgGrant } from '@dao-dao/types/protobuf/codegen/cosmos/authz/v1beta1/tx'
+import { SendAuthorization } from '@dao-dao/types/protobuf/codegen/cosmos/bank/v1beta1/authz'
+import { toTimestamp } from '@dao-dao/types/protobuf/codegen/helpers'
 import {
   CHAIN_GAS_MULTIPLIER,
   convertMicroDenomToDenomWithDecimals,
-  cwMsgToEncodeObject,
   getChainForChainId,
   getDisplayNameForChainId,
   getFallbackImage,
   getImageUrlForChainId,
   getRpcForChainId,
-  getTokenForChainIdAndDenom,
   makeBankMessage,
   processError,
+  retry,
 } from '@dao-dao/utils'
-import { MsgGrant } from '@dao-dao/utils/protobuf/codegen/cosmos/authz/v1beta1/tx'
-import { SendAuthorization } from '@dao-dao/utils/protobuf/codegen/cosmos/bank/v1beta1/authz'
-import { toTimestamp } from '@dao-dao/utils/protobuf/codegen/helpers'
+
+import { useWallet } from '../hooks'
 
 enum RelayStatus {
   Uninitialized,
@@ -81,57 +87,63 @@ enum RelayStatus {
 }
 
 const RELAYER_FUNDS_NEEDED: Partial<Record<ChainId | string, number>> = {
-  [ChainId.JunoMainnet]: 100000,
-  [ChainId.OsmosisMainnet]: 100000,
-  [ChainId.StargazeMainnet]: 2000000,
-  [ChainId.NeutronMainnet]: 500000,
-  [ChainId.TerraMainnet]: 100000,
-  [ChainId.MigalooMainnet]: 2000000,
-  [ChainId.KujiraMainnet]: 100000,
-  [ChainId.OraichainMainnet]: 100000,
+  [ChainId.CosmosHubMainnet]: 0.06 * 10 ** 6,
+  [ChainId.JunoMainnet]: 1 * 10 ** 6,
+  [ChainId.OsmosisMainnet]: 0.1 * 10 ** 6,
+  [ChainId.StargazeMainnet]: 2 * 10 ** 6,
+  [ChainId.NeutronMainnet]: 0.5 * 10 ** 6,
+  [ChainId.TerraMainnet]: 0.1 * 10 ** 6,
+  [ChainId.MigalooMainnet]: 40 * 10 ** 6,
+  [ChainId.KujiraMainnet]: 0.1 * 10 ** 6,
+  [ChainId.OraichainMainnet]: 0.1 * 10 ** 6,
+  [ChainId.ChihuahuaMainnet]: 1000 * 10 ** 6,
+  [ChainId.ArchwayMainnet]: 1 * 10 ** 18,
+  [ChainId.InjectiveMainnet]: 0.03 * 10 ** 18,
+  [ChainId.TerraClassicMainnet]: 1000 * 10 ** 6,
+  [ChainId.OmniflixHubMainnet]: 1 * 10 ** 6,
+  [ChainId.BitsongMainnet]: 10 * 10 ** 6,
+  [ChainId.NobleMainnet]: 0.1 * 10 ** 6,
 }
 
 type Relayer = {
   chain: Chain
   chainImageUrl: string
-  feeToken: {
-    denom: string
-    average_gas_price?: number
-  }
+  feeToken: GenericToken
   wallet: {
     address: string
     signingStargateClient: SigningStargateClient
   }
   relayerAddress: string
   client: IbcClient
-  // Will be loaded for receiving chains only. The current chain will not have a
-  // polytone note since it is just responsible for sending packets.
-  polytoneConnection?: PolytoneConnection
 }
 
 export const SelfRelayExecuteModal = ({
   uniqueId,
   chainIds: _chainIds,
+  crossChainPackets,
   transaction,
   onSuccess,
   onClose,
   visible,
 }: SelfRelayExecuteModalProps) => {
   const { t } = useTranslation()
+  const queryClient = useQueryClient()
+
   const mnemonicKey = `relayer_mnemonic_${uniqueId}`
 
   // Current chain.
   const {
     chain: { chain_id: currentChainId },
-    config,
   } = useSupportedChainContext()
 
   // All chains, including current.
   const chainIds = [currentChainId, ..._chainIds]
   const chains = uniq(chainIds).map(getChainForChainId)
-  const wallets = useChains(chains.map(({ chain_name }) => chain_name))
-  const allWalletsConnected = Object.values(wallets).every(
-    (wallet) => wallet.isWalletConnected
+
+  const { isWalletConnected, chainWallet, connect } = useWallet()
+  const chainWalletList = chainWallet?.mainWallet?.getChainWalletList(false)
+  const chainWallets = chainIds.map((chainId) =>
+    chainWalletList?.find((cw) => cw.chainId === chainId)
   )
 
   const [status, setStatus] = useState<RelayStatus>(RelayStatus.Uninitialized)
@@ -160,6 +172,11 @@ export const SelfRelayExecuteModal = ({
   // If relay fails and user decides to refund and cancel, this will be set to
   // true.
   const [canceling, setCanceling] = useState(false)
+
+  // If relay fails due to insufficient funds, this multiplier is applied to the
+  // funds needed that is defined at the top.
+  const [fundsNeededRetryMultiplier, setFundsNeededRetryMultiplier] =
+    useState(1)
 
   // When the modal is closed, reset state.
   useEffect(() => {
@@ -218,14 +235,25 @@ export const SelfRelayExecuteModal = ({
     return () => clearInterval(interval)
   }, [relayers, refreshBalances])
 
+  // Create memoized function that returns the relayer funds for a chain,
+  // adjusting for number of packets.
+  const getRelayerFundsRef = useUpdatingRef(
+    (chainId: string): number =>
+      // Use relayer funds as base, increase by 5% per packet, and apply retry
+      // multiplier.
+      (RELAYER_FUNDS_NEEDED[chainId] ?? 0) *
+      (1 + crossChainPackets.length * 0.05) *
+      fundsNeededRetryMultiplier
+  )
+
   const walletFunds = useCachedLoadingWithError(
     relayers
       ? waitForAll(
           relayers.map(({ chain: { chain_id: chainId }, feeToken, wallet }) =>
             genericTokenBalanceSelector({
-              type: TokenType.Native,
               chainId,
-              denomOrAddress: feeToken.denom,
+              type: feeToken.type,
+              denomOrAddress: feeToken.denomOrAddress,
               address: wallet.address,
             })
           )
@@ -237,7 +265,7 @@ export const SelfRelayExecuteModal = ({
       ? walletFunds.data.map(
           ({ balance }, index) =>
             Number(balance) >=
-            (RELAYER_FUNDS_NEEDED[relayers[index].chain.chain_id] ?? 0)
+            getRelayerFundsRef.current(relayers[index].chain.chain_id)
         )
       : undefined
 
@@ -247,9 +275,9 @@ export const SelfRelayExecuteModal = ({
           relayers.map(
             ({ chain: { chain_id: chainId }, feeToken, relayerAddress }) =>
               nativeDenomBalanceSelector({
-                walletAddress: relayerAddress,
-                denom: feeToken.denom,
                 chainId,
+                walletAddress: relayerAddress,
+                denom: feeToken.denomOrAddress,
               })
           )
         )
@@ -265,7 +293,7 @@ export const SelfRelayExecuteModal = ({
       .every(
         ({ amount }, index) =>
           Number(amount) >=
-          (RELAYER_FUNDS_NEEDED[relayers[index + 1].chain.chain_id] ?? 0)
+          getRelayerFundsRef.current(relayers[index + 1].chain.chain_id)
       )
 
   const setupRelayer = async () => {
@@ -274,13 +302,39 @@ export const SelfRelayExecuteModal = ({
       return
     }
 
-    if (!allWalletsConnected) {
-      toast.error(t('error.chainNotConnected'))
+    // Should never happen...
+    const unsupportedChains = chains.filter((_, index) => !chainWallets[index])
+    if (unsupportedChains.length > 0) {
+      toast.error(
+        t('error.unsupportedChains', {
+          count: unsupportedChains.length,
+          chains: unsupportedChains
+            .map(({ chain_id }) => getDisplayNameForChainId(chain_id))
+            .join(', '),
+        })
+      )
       return
     }
 
-    // Make sure all wallets are connected by trying to connect first one.
-    Object.values(wallets)[0]?.connect()
+    // Connect to all disconnected chain wallets.
+    const relayerChainWallets = chainWallets as ChainWalletBase[]
+    try {
+      await Promise.all(
+        relayerChainWallets.map(
+          async (wallet) =>
+            wallet.isWalletConnected || (await wallet.connect(false))
+        )
+      )
+
+      // Make sure all wallets are connected. Should never happen...
+      if (relayerChainWallets.some((wallet) => !wallet.isWalletConnected)) {
+        throw new Error('unexpected wallet not connected')
+      }
+    } catch (err) {
+      console.error(err)
+      toast.error(t('error.failedToConnect'))
+      return
+    }
 
     setStatus(RelayStatus.Initializing)
     try {
@@ -290,30 +344,32 @@ export const SelfRelayExecuteModal = ({
         (await DirectSecp256k1HdWallet.generate(24)).mnemonic
 
       const relayers = await Promise.all(
-        chains.map(async (chain): Promise<Relayer> => {
+        chains.map(async (chain, index): Promise<Relayer> => {
           const chainImageUrl =
             getImageUrlForChainId(chain.chain_id) ||
             getFallbackImage(chain.chain_id)
 
-          const feeToken = chain.fees?.fee_tokens[0]
-          if (!feeToken) {
+          const feeDenom = chain.fees?.fee_tokens[0]?.denom
+          if (!feeDenom) {
             throw new Error(t('error.feeTokenNotFound'))
           }
 
-          const polytoneConnection = config.polytone?.[chain.chain_id]
-          // Only the receiving chains need polytone notes. The current chain is
-          // just responsible for sending.
-          if (chain.chain_id !== currentChainId && !polytoneConnection) {
-            throw new Error(t('error.polytoneConnectionNotFound'))
-          }
+          const feeToken = await queryClient.fetchQuery(
+            tokenQueries.info(queryClient, {
+              chainId: chain.chain_id,
+              type: TokenType.Native,
+              denomOrAddress: feeDenom,
+            })
+          )
 
           // Connect wallet to chain so we can send tokens.
-          const connectedWallet = wallets[chain.chain_name]
-          if (!connectedWallet?.address) {
+          const { address, getSigningStargateClient } =
+            relayerChainWallets[index]
+          if (!address) {
             throw new Error(t('error.chainNotConnected'))
           }
-          const signingStargateClient =
-            await connectedWallet.getSigningStargateClient()
+
+          const signingStargateClient = await getSigningStargateClient()
 
           // Create relayer signer.
           const signer = await DirectSecp256k1HdWallet.fromMnemonic(mnemonic, {
@@ -322,19 +378,19 @@ export const SelfRelayExecuteModal = ({
           const relayerAddress = (await signer.getAccounts())[0].address
 
           // Create IBC client with newly created signer.
-          const client = await IbcClient.connectWithSigner(
-            getRpcForChainId(chain.chain_id),
-            signer,
-            relayerAddress,
-            {
-              // How long it waits in between checking for a new block.
-              estimatedBlockTime: 3000,
-              // How long it waits until looking for acks.
-              estimatedIndexerTime: 3000,
-              gasPrice: GasPrice.fromString(
-                `${feeToken.average_gas_price ?? 0}${feeToken.denom}`
-              ),
-            }
+          const client = await retry(10, (attempt) =>
+            IbcClient.connectWithSigner(
+              getRpcForChainId(chain.chain_id, attempt - 1),
+              signer,
+              relayerAddress,
+              {
+                // How long it waits in between checking for a new block.
+                estimatedBlockTime: 3000,
+                // How long it waits until looking for acks.
+                estimatedIndexerTime: 3000,
+                gasPrice: new DynamicGasPrice(queryClient, chain),
+              }
+            )
           )
 
           return {
@@ -342,7 +398,7 @@ export const SelfRelayExecuteModal = ({
             chainImageUrl,
             feeToken,
             wallet: {
-              address: connectedWallet.address,
+              address,
               // cosmos-kit has an older version of the package. This is a
               // workaround.
               signingStargateClient:
@@ -350,7 +406,6 @@ export const SelfRelayExecuteModal = ({
             },
             relayerAddress,
             client,
-            polytoneConnection,
           }
         })
       )
@@ -397,12 +452,12 @@ export const SelfRelayExecuteModal = ({
       // Get current balance of relayer wallet.
       const currentBalance = await relayer.client.query.bank.balance(
         relayer.relayerAddress,
-        relayer.feeToken.denom
+        relayer.feeToken.denomOrAddress
       )
 
       const fundsNeeded =
         // Give a little extra to cover the authz tx fee.
-        (RELAYER_FUNDS_NEEDED[chainId] ?? 0) * 1.3 -
+        getRelayerFundsRef.current(chainId) * 1.2 -
         Number(currentBalance.amount)
 
       let msgs: EncodeObject[] =
@@ -410,12 +465,13 @@ export const SelfRelayExecuteModal = ({
           ? // Send tokens to relayer wallet if needed.
             [
               cwMsgToEncodeObject(
+                chainId,
                 {
                   bank: {
                     send: {
                       amount: coins(
                         BigInt(fundsNeeded).toString(),
-                        relayer.feeToken.denom
+                        relayer.feeToken.denomOrAddress
                       ),
                       to_address: relayer.relayerAddress,
                     },
@@ -430,7 +486,7 @@ export const SelfRelayExecuteModal = ({
       if (withExecuteRelay && !executeTx && transaction.type === 'execute') {
         msgs.push(
           ...transaction.msgs.map((msg) =>
-            cwMsgToEncodeObject(msg, relayer.wallet.address)
+            cwMsgToEncodeObject(chainId, msg, relayer.wallet.address)
           )
         )
       }
@@ -454,7 +510,7 @@ export const SelfRelayExecuteModal = ({
         (
           await relayer.client.query.bank.balance(
             relayer.relayerAddress,
-            relayer.feeToken.denom
+            relayer.feeToken.denomOrAddress
           )
         ).amount
       )
@@ -486,7 +542,7 @@ export const SelfRelayExecuteModal = ({
                   SendAuthorization.fromPartial({
                     spendLimit: coins(
                       BigInt(newBalance).toString(),
-                      relayer.feeToken.denom
+                      relayer.feeToken.denomOrAddress
                     ),
                   })
                 ),
@@ -529,7 +585,7 @@ export const SelfRelayExecuteModal = ({
     ({ set }) =>
       () => {
         chainIds.forEach((chainId) =>
-          set(refreshUnreceivedIbcDataAtom(chainId), (id) => id + 1)
+          set(refreshIbcDataAtom(chainId), (id) => id + 1)
         )
         set(refreshPolytoneListenerResultsAtom, (id) => id + 1)
       },
@@ -558,7 +614,7 @@ export const SelfRelayExecuteModal = ({
 
     try {
       // Parse the packets from the execution TX events.
-      const packets = parsePacketsFromTendermintEvents(
+      const txPackets = parsePacketsFromTendermintEvents(
         currentExecuteTx.events
       ).map((packet) => ({
         packet,
@@ -576,189 +632,314 @@ export const SelfRelayExecuteModal = ({
         // Wait for previous chain to finish relaying packets.
         await prev
 
-        const { chain, client, polytoneConnection } = relayer
-
-        // Type-check, should never happen since we slice off the first (current
-        // chain) relayer, which is just responsible for sending.
-        if (!polytoneConnection) {
-          throw new Error(t('error.polytoneNoteNotFound'))
-        }
+        const { chain, client } = relayer
 
         // Get packets for this chain that need relaying.
-        const thesePackets = packets.filter(
-          ({ packet }) =>
-            packet.sourcePort === `wasm.${polytoneConnection.note}` &&
-            packet.sourceChannel === polytoneConnection.localChannel &&
-            packet.destinationChannel === polytoneConnection.remoteChannel
+        const packets = crossChainPackets.filter(
+          ({ data: { chainId } }) => chainId === chain.chain_id
         )
-        if (!thesePackets.length) {
+
+        // Choose TX packets that match packets we want to relay.
+        const chainPackets = txPackets.filter(({ packet }) =>
+          packets.some(
+            ({ srcPort, dstPort }) =>
+              packet.sourcePort === srcPort &&
+              packet.destinationPort === dstPort
+          )
+        )
+        if (!chainPackets.length) {
           return
         }
-        const packetSequences = thesePackets.map(({ packet }) =>
-          Number(packet.sequence)
-        )
 
         setRelaying({
           type: 'packet',
           relayer,
         })
 
-        const link = await Link.createWithExistingConnections(
-          // First relayer is current chain sending packets.
-          relayers[0].client,
-          client,
-          polytoneConnection.localConnection,
-          polytoneConnection.remoteConnection
+        // Get unique source channels and connections.
+        const srcConnections = (
+          await Promise.all(
+            uniq(chainPackets.map(({ packet }) => packet.sourceChannel)).map(
+              async (channel) => ({
+                channel,
+                connection: (
+                  await relayers[0].client.query.ibc.channel.channel(
+                    chainPackets.find(
+                      ({ packet }) => packet.sourceChannel === channel
+                    )!.packet.sourcePort,
+                    channel
+                  )
+                ).channel?.connectionHops[0],
+              })
+            )
+          )
+        ).flatMap(({ channel, connection }) =>
+          connection ? { channel, connection } : []
         )
 
-        // Relay packets. Try 5 times.
-        let tries = 5
-        while (tries) {
-          try {
-            const unrelayedPackets =
-              await client.query.ibc.channel.unreceivedPackets(
-                thesePackets[0].packet.destinationPort,
-                thesePackets[0].packet.destinationChannel,
-                packetSequences
-              )
+        // Get connections for channels.
+        const connections = (
+          await Promise.all(
+            srcConnections
+              .reduce((acc, { channel, connection }) => {
+                let existing = acc.find((a) => a.src === connection)
+                if (!existing) {
+                  existing = {
+                    src: connection,
+                    packets: [],
+                  }
+                  acc.push(existing)
+                }
 
-            const packetsNeedingRelay = thesePackets.filter(({ packet }) =>
-              unrelayedPackets.sequences.some((seq) => seq === packet.sequence)
-            )
+                // Find packets coming from the same channel.
+                existing.packets.push(
+                  ...chainPackets.filter(
+                    ({ packet }) => packet.sourceChannel === channel
+                  )
+                )
 
-            // Relay only the packets that need relaying.
-            if (packetsNeedingRelay.length) {
-              await link.relayPackets('A', packetsNeedingRelay)
-            }
+                return acc
+              }, [] as { src: string; packets: PacketWithMetadata[] }[])
+              .map(async (data) => ({
+                ...data,
+                dst: (
+                  await relayers[0].client.query.ibc.connection.connection(
+                    data.src
+                  )
+                ).connection?.counterparty.connectionId,
+              }))
+          )
+        ).flatMap(({ src, dst, packets }) => (dst ? { src, dst, packets } : []))
 
-            break
-          } catch (err) {
-            // If relayer wallet out of funds, throw immediately since they need
-            // to top up.
-            if (
-              err instanceof Error &&
-              err.message.includes('insufficient funds')
-            ) {
-              // Refresh all balances.
-              relayers.map(refreshBalances)
-              throw new Error(t('error.relayerWalletNeedsFunds'))
-            }
-
-            tries -= 1
-
-            console.error(
-              t('error.failedToRelayPackets', {
-                chain: chain.pretty_name,
-              }) + (tries > 0 ? ' ' + t('info.tryingAgain') : ''),
-              err
-            )
-
-            // If no more tries, rethrow error.
-            if (tries === 0) {
-              throw err
-            }
-
-            // Wait a few seconds before trying again.
-            await new Promise((resolve) => setTimeout(resolve, 5000))
-          }
+        if (!connections.length) {
+          throw new Error(t('error.failedToLoadIbcConnection'))
         }
 
-        // Wait a few seconds for the packets to be indexed.
-        await new Promise((resolve) => setTimeout(resolve, 5000))
+        // Run relay process for each connection pair on this chain.
+        for (const {
+          src: srcConnection,
+          dst: dstConnection,
+          packets,
+        } of connections) {
+          const link = await Link.createWithExistingConnections(
+            // First relayer is current chain sending packets.
+            relayers[0].client,
+            client,
+            srcConnection,
+            dstConnection
+          )
 
-        setRelaying({
-          type: 'ack',
-          relayer,
-        })
+          // Get packets with unique source channel/port and destination
+          // channel/port combinations.
+          const uniquePackets = uniq(
+            packets.map((p) =>
+              [
+                p.packet.sourceChannel,
+                p.packet.sourcePort,
+                p.packet.destinationChannel,
+                p.packet.destinationPort,
+              ].join('/')
+            )
+          ).map((key) => {
+            const [srcChannel, srcPort, dstChannel, dstPort] = key.split('/')
+            return {
+              srcChannel,
+              srcPort,
+              dstChannel,
+              dstPort,
+            }
+          })
 
-        const sourcePort = thesePackets[0].packet.sourcePort
-        const sourceChannel = thesePackets[0].packet.sourceChannel
+          setRelaying({
+            type: 'packet',
+            relayer,
+          })
 
-        // Relay acks. Try 5 times.
-        tries = 5
-        while (tries) {
-          try {
-            // Find acks that need relaying.
-            const smallestSequenceNumber = Math.min(...packetSequences)
-            const largestSequenceNumber = Math.max(...packetSequences)
-            const search = await link.endB.client.tm.txSearchAll({
-              query: `write_acknowledgement.packet_connection='${polytoneConnection.remoteConnection}' AND write_acknowledgement.packet_src_port='${sourcePort}' AND write_acknowledgement.packet_src_channel='${sourceChannel}' AND write_acknowledgement.packet_sequence>=${smallestSequenceNumber} AND write_acknowledgement.packet_sequence<=${largestSequenceNumber}`,
-            })
+          const packetSequences = packets.map(({ packet }) =>
+            Number(packet.sequence)
+          )
 
-            const allAcks = search.txs.flatMap(({ height, result, hash }) => {
-              const events = result.events.map(fromTendermintEvent)
-              return parseAcksFromTxEvents(events).map(
-                (ack): AckWithMetadata => ({
-                  height,
-                  txHash: toHex(hash).toUpperCase(),
-                  txEvents: events,
-                  ...ack,
-                })
+          // Relay packets. Try 5 times.
+          let tries = 5
+          while (tries) {
+            try {
+              const unrelayedPackets = (
+                await Promise.all(
+                  uniquePackets.map(
+                    async ({ dstChannel, dstPort }) =>
+                      (
+                        await client.query.ibc.channel.unreceivedPackets(
+                          dstPort,
+                          dstChannel,
+                          packetSequences
+                        )
+                      ).sequences
+                  )
+                )
+              ).flat()
+
+              const packetsNeedingRelay = packets.filter(({ packet }) =>
+                unrelayedPackets.includes(packet.sequence)
               )
-            })
 
-            const unrelayedAcks =
-              // First relayer is current chain sending packets/getting acks.
-              await relayers[0].client.query.ibc.channel.unreceivedAcks(
-                sourcePort,
-                sourceChannel,
-                allAcks.map(({ originalPacket }) =>
-                  Number(originalPacket.sequence)
+              // Relay only the packets that need relaying.
+              if (packetsNeedingRelay.length) {
+                await link.relayPackets('A', packetsNeedingRelay)
+              }
+
+              break
+            } catch (err) {
+              // If relayer wallet out of funds, throw immediately since they
+              // need to top up.
+              if (
+                err instanceof Error &&
+                err.message.includes('insufficient funds')
+              ) {
+                // Refresh all balances.
+                relayers.map(refreshBalances)
+                console.error(err)
+                // Increase multipler by 25% so we retry with more funds than
+                // before.
+                setFundsNeededRetryMultiplier((m) => m + 0.25)
+                throw new Error(t('error.relayerWalletNeedsFunds'))
+              }
+
+              tries -= 1
+
+              console.error(
+                t('error.failedToRelayPackets', {
+                  chain: getDisplayNameForChainId(chain.chain_id),
+                }) + (tries > 0 ? ' ' + t('info.tryingAgain') : ''),
+                err
+              )
+
+              // If no more tries, rethrow error.
+              if (tries === 0) {
+                throw err
+              }
+
+              // Wait a few seconds before trying again.
+              await new Promise((resolve) => setTimeout(resolve, 5000))
+            }
+          }
+
+          // Wait a few seconds for the packets to be indexed.
+          await new Promise((resolve) => setTimeout(resolve, 5000))
+
+          setRelaying({
+            type: 'ack',
+            relayer,
+          })
+
+          // Relay acks. Try 5 times.
+          tries = 5
+          while (tries) {
+            try {
+              // Find acks that need relaying.
+              const smallestSequenceNumber = Math.min(...packetSequences)
+              const largestSequenceNumber = Math.max(...packetSequences)
+              const txSearch = (
+                await Promise.all(
+                  uniquePackets.map(
+                    async ({ srcChannel, srcPort }) =>
+                      // Just search one page (instead of all pages via
+                      // txSearchAll) because it incorrectly paginates sometimes
+                      // and throws an error.
+                      (
+                        await link.endB.client.tm.txSearch({
+                          query: `write_acknowledgement.packet_connection='${dstConnection}' AND write_acknowledgement.packet_src_port='${srcPort}' AND write_acknowledgement.packet_src_channel='${srcChannel}' AND write_acknowledgement.packet_sequence>=${smallestSequenceNumber} AND write_acknowledgement.packet_sequence<=${largestSequenceNumber}`,
+                        })
+                      ).txs
+                  )
+                )
+              ).flat()
+
+              const allAcks = txSearch.flatMap(({ height, result, hash }) => {
+                const events = result.events.map(fromTendermintEvent)
+                return parseAcksFromTxEvents(events).map(
+                  (ack): AckWithMetadata => ({
+                    height,
+                    txHash: toHex(hash).toUpperCase(),
+                    txEvents: events,
+                    ...ack,
+                  })
+                )
+              })
+
+              const unrelayedAcks = (
+                await Promise.all(
+                  uniquePackets.map(
+                    async ({ srcChannel, srcPort }) =>
+                      // First relayer is current chain sending packets/getting
+                      // acks.
+                      (
+                        await relayers[0].client.query.ibc.channel.unreceivedAcks(
+                          srcPort,
+                          srcChannel,
+                          allAcks.map(({ originalPacket }) =>
+                            Number(originalPacket.sequence)
+                          )
+                        )
+                      ).sequences
+                  )
+                )
+              ).flat()
+
+              const acksNeedingRelay = allAcks.filter(({ originalPacket }) =>
+                unrelayedAcks.includes(originalPacket.sequence)
+              )
+
+              // Acknowledge only the packets that need relaying.
+              if (acksNeedingRelay.length) {
+                await link.relayAcks('B', acksNeedingRelay)
+              }
+
+              break
+            } catch (err) {
+              // If relayer wallet out of funds, throw immediately since they
+              // need to top up.
+              if (
+                err instanceof Error &&
+                err.message.includes('insufficient funds')
+              ) {
+                // Refresh all balances.
+                relayers.map(refreshBalances)
+                console.error(err)
+                // Increase multipler by 25% so we retry with more funds than
+                // before.
+                setFundsNeededRetryMultiplier((m) => m + 0.25)
+                throw new Error(t('error.relayerWalletNeedsFunds'))
+              }
+
+              tries -= 1
+
+              console.error(
+                t('error.failedToRelayAcks', {
+                  chain: getDisplayNameForChainId(chain.chain_id),
+                }) + (tries > 0 ? ' ' + t('info.tryingAgain') : ''),
+                err
+              )
+
+              // If no more tries, rethrow error.
+              if (tries === 0) {
+                throw err
+              }
+
+              // Wait a few seconds before trying again.
+              await new Promise((resolve) =>
+                setTimeout(
+                  resolve,
+                  // If redundant packets detected, a relayer already relayed
+                  // these acks. In that case, wait a bit longer to let it
+                  // finish. The ack relayer above tries to check which acks
+                  // have not yet been received, so if a relayer takes care of
+                  // the acks, we will safely continue.
+                  err instanceof Error && err.message.includes('redundant')
+                    ? 10 * 1000
+                    : 5 * 1000
                 )
               )
-
-            const acksNeedingRelay = allAcks.filter(({ originalPacket }) =>
-              unrelayedAcks.sequences.some(
-                (seq) => seq === originalPacket.sequence
-              )
-            )
-
-            // Acknowledge only the packets that need relaying.
-            if (acksNeedingRelay.length) {
-              await link.relayAcks('B', acksNeedingRelay)
             }
-
-            break
-          } catch (err) {
-            // If relayer wallet out of funds, throw immediately since they need
-            // to top up.
-            if (
-              err instanceof Error &&
-              err.message.includes('insufficient funds')
-            ) {
-              // Refresh all balances.
-              relayers.map(refreshBalances)
-              throw new Error(t('error.relayerWalletNeedsFunds'))
-            }
-
-            tries -= 1
-
-            console.error(
-              t('error.failedToRelayAcks', {
-                chain: chain.pretty_name,
-              }) + (tries > 0 ? ' ' + t('info.tryingAgain') : ''),
-              err
-            )
-
-            // If no more tries, rethrow error.
-            if (tries === 0) {
-              throw err
-            }
-
-            // Wait a few seconds before trying again.
-            await new Promise((resolve) =>
-              setTimeout(
-                resolve,
-                // If redundant packets detected, a relayer already relayed
-                // these acks. In that case, wait a bit longer to let it finish.
-                // The ack relayer above tries to check which acks have not yet
-                // been received, so if a relayer takes care of the acks, we
-                // will safely continue.
-                err instanceof Error && err.message.includes('redundant')
-                  ? 10 * 1000
-                  : 5 * 1000
-              )
-            )
           }
         }
       }, Promise.resolve())
@@ -844,6 +1025,7 @@ export const SelfRelayExecuteModal = ({
         relayerAddress,
         [
           cwMsgToEncodeObject(
+            chain.chain_id,
             {
               bank: makeBankMessage(
                 remainingTokens.amount,
@@ -945,16 +1127,9 @@ export const SelfRelayExecuteModal = ({
                 <Button
                   className="self-end"
                   loading={status === RelayStatus.Initializing}
-                  onClick={
-                    allWalletsConnected
-                      ? setupRelayer
-                      : // Connect all wallets by connecting one.
-                        () => Object.values(wallets)[0]?.connect()
-                  }
+                  onClick={isWalletConnected ? setupRelayer : connect}
                 >
-                  {allWalletsConnected
-                    ? t('button.begin')
-                    : t('button.connect')}
+                  {isWalletConnected ? t('button.begin') : t('button.connect')}
                 </Button>
               </div>
             ),
@@ -1001,8 +1176,7 @@ export const SelfRelayExecuteModal = ({
                           fundedAmount[chain_id] ?? 0
                     const empty = funds === 0
 
-                    const funded =
-                      funds >= (RELAYER_FUNDS_NEEDED[chain_id] ?? 0)
+                    const funded = funds >= getRelayerFundsRef.current(chain_id)
 
                     const isExecute = index === 0
                     // If this is the execute, we need to make sure all
@@ -1097,7 +1271,7 @@ export const SelfRelayExecuteModal = ({
                             />
 
                             <Tooltip title={t('info.funded')}>
-                              <Check className="!h-4 !w-4 text-icon-interactive-valid" />
+                              <Check className="text-icon-interactive-valid !h-4 !w-4" />
                             </Tooltip>
                           </div>
                         )}
@@ -1119,7 +1293,7 @@ export const SelfRelayExecuteModal = ({
             content: () =>
               status === RelayStatus.RelayErrored ? (
                 <div className="flex flex-row flex-wrap items-center justify-between gap-x-8 gap-y-4">
-                  <p className="break-all text-text-interactive-error">
+                  <p className="text-text-interactive-error break-all">
                     {relayError}
                   </p>
 
@@ -1146,7 +1320,7 @@ export const SelfRelayExecuteModal = ({
                           relaying.relayer.chain.chain_id
                         )}
                       >
-                        <div className="flex items-center justify-center rounded-l-full bg-background-base p-1">
+                        <div className="bg-background-base flex items-center justify-center rounded-l-full p-1">
                           <div
                             className="h-8 w-8 rounded-full bg-contain bg-center bg-no-repeat"
                             style={{
@@ -1167,7 +1341,7 @@ export const SelfRelayExecuteModal = ({
                           relayers[0].chain.chain_id
                         )}
                       >
-                        <div className="flex items-center justify-center rounded-r-full bg-background-base p-1">
+                        <div className="bg-background-base flex items-center justify-center rounded-r-full p-1">
                           <div
                             className="h-8 w-8 rounded-full bg-contain bg-center bg-no-repeat"
                             style={{
@@ -1204,11 +1378,7 @@ export const SelfRelayExecuteModal = ({
                     ...(relayers ? [relayers[0]] : []),
                   ].map(
                     (
-                      {
-                        chain: { chain_id },
-                        chainImageUrl,
-                        feeToken: { denom },
-                      },
+                      { chain: { chain_id }, chainImageUrl, feeToken },
                       index
                     ) => {
                       // Adjust the index to reflect the reordering above.
@@ -1221,10 +1391,6 @@ export const SelfRelayExecuteModal = ({
                       const empty = funds === 0
 
                       const refunded = refundedAmount[chain_id] ?? 0
-                      const feeToken = getTokenForChainIdAndDenom(
-                        chain_id,
-                        denom
-                      )
 
                       return (
                         <Fragment key={chain_id}>
@@ -1253,7 +1419,7 @@ export const SelfRelayExecuteModal = ({
 
                             {empty ? (
                               <Tooltip title="Refunded">
-                                <Check className="!h-4 !w-4 text-icon-interactive-valid" />
+                                <Check className="text-icon-interactive-valid !h-4 !w-4" />
                               </Tooltip>
                             ) : (
                               <Loader fill={false} size={20} />

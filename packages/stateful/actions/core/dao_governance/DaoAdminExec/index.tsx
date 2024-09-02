@@ -1,22 +1,33 @@
-import { useCallback, useEffect } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useFormContext } from 'react-hook-form'
-import { constSelector, useRecoilValueLoadable } from 'recoil'
+import { useTranslation } from 'react-i18next'
 
-import { DaoCoreV2Selectors, walletAdminOfDaosSelector } from '@dao-dao/state'
-import { JoystickEmoji, useCachedLoadable } from '@dao-dao/stateless'
+import { daoQueries } from '@dao-dao/state'
 import {
-  ActionChainContextType,
+  ChainProvider,
+  DaoSupportedChainPickerInput,
+  InputLabel,
+  JoystickEmoji,
+  RadioInputNoForm,
+} from '@dao-dao/stateless'
+import {
   ActionComponent,
   ActionContextType,
   ActionKey,
   ActionMaker,
+  DaoSource,
   UseDecodedCosmosMsg,
   UseDefaults,
   UseTransformToCosmos,
 } from '@dao-dao/types'
 import {
+  decodePolytoneExecuteMsg,
+  getChainAddressForActionOptions,
   isValidBech32Address,
-  makeWasmMessage,
+  makeExecuteSmartContractMessage,
+  makeValidateAddress,
+  maybeGetChainForChainId,
+  maybeMakePolytoneExecuteMessage,
   objectMatchesStructure,
 } from '@dao-dao/utils'
 
@@ -26,7 +37,7 @@ import {
   EntityDisplay,
   SuspenseLoader,
 } from '../../../../components'
-import { daoInfoSelector } from '../../../../recoil'
+import { useQueryLoadingDataWithError } from '../../../../hooks'
 import {
   useActionOptions,
   useActionsForMatching,
@@ -34,33 +45,28 @@ import {
 } from '../../../react'
 import {
   DaoAdminExecData,
-  DaoAdminExecOptions,
   DaoAdminExecComponent as StatelessDaoAdminExecComponent,
 } from './Component'
 
 const useDefaults: UseDefaults<DaoAdminExecData> = () => ({
+  chainId: useActionOptions().chain.chain_id,
   coreAddress: '',
   msgs: [],
 })
 
-type InnerOptions = Pick<DaoAdminExecOptions, 'childDaos'>
-
-const InnerComponentLoading: ActionComponent<InnerOptions> = (props) => (
+const InnerComponentLoading: ActionComponent = (props) => (
   <StatelessDaoAdminExecComponent
     {...props}
     options={{
       categories: [],
       loadedActions: {},
       actionsForMatching: [],
-      childDaos: props.options.childDaos,
-      AddressInput,
-      EntityDisplay,
       SuspenseLoader,
     }}
   />
 )
 
-const InnerComponent: ActionComponent<InnerOptions> = (props) => {
+const InnerComponent: ActionComponent = (props) => {
   const { categories, loadedActions } = useLoadedActionsAndCategories({
     isCreating: props.isCreating,
   })
@@ -73,9 +79,6 @@ const InnerComponent: ActionComponent<InnerOptions> = (props) => {
         categories,
         loadedActions,
         actionsForMatching,
-        childDaos: props.options.childDaos,
-        AddressInput,
-        EntityDisplay,
         SuspenseLoader,
       }}
     />
@@ -83,118 +86,161 @@ const InnerComponent: ActionComponent<InnerOptions> = (props) => {
 }
 
 const Component: ActionComponent = (props) => {
+  const { t } = useTranslation()
   const {
+    chain: { chain_id: currentChainId },
     context,
     address,
-    chain: { chain_id: chainId, bech32_prefix: bech32Prefix },
   } = useActionOptions()
 
-  // Load DAO info for chosen DAO.
-  const { watch, setValue, clearErrors } = useFormContext<DaoAdminExecData>()
+  const { watch, register, setValue } = useFormContext<DaoAdminExecData>()
+  const chainId =
+    watch((props.fieldNamePrefix + 'chainId') as 'chainId') || currentChainId
   const coreAddress = watch(
     (props.fieldNamePrefix + 'coreAddress') as 'coreAddress'
   )
 
-  // Reset actions when core address changes during creation.
-  useEffect(() => {
-    if (props.isCreating) {
-      setValue((props.fieldNamePrefix + 'msgs') as 'msgs', [])
-      clearErrors((props.fieldNamePrefix + 'msgs') as 'msgs')
-      setValue(
-        (props.fieldNamePrefix + '_actionData') as '_actionData',
-        undefined
-      )
-      clearErrors((props.fieldNamePrefix + '_actionData') as '_actionData')
-    }
-  }, [
-    clearErrors,
-    coreAddress,
-    props.fieldNamePrefix,
-    props.isCreating,
-    setValue,
-  ])
+  const bech32Prefix = maybeGetChainForChainId(chainId)?.bech32_prefix
 
-  const daoSubDaosLoadable = useCachedLoadable(
+  const queryClient = useQueryClient()
+  const daoSubDaosLoading = useQueryLoadingDataWithError(
     context.type === ActionContextType.Dao
-      ? DaoCoreV2Selectors.listAllSubDaosSelector({
-          contractAddress: address,
+      ? daoQueries.listAllSubDaos(queryClient, {
           chainId,
+          address,
           // We only care about the SubDAOs this DAO has admin powers over.
           onlyAdmin: true,
         })
-      : undefined
+      : undefined,
+    (daos) =>
+      daos.map(
+        ({ chainId, addr }): DaoSource => ({
+          chainId,
+          coreAddress: addr,
+        })
+      )
   )
-  const walletAdminOfDaosLoadable = useCachedLoadable(
+  const walletAdminOfDaosLoading = useQueryLoadingDataWithError(
     context.type === ActionContextType.Wallet ||
       context.type === ActionContextType.Gov
-      ? walletAdminOfDaosSelector({
+      ? daoQueries.listWalletAdminOfDaos(queryClient, {
           chainId,
-          walletAddress: address,
+          address,
         })
-      : undefined
-  )
-  const childDaosLoadable =
-    context.type === ActionContextType.Dao
-      ? daoSubDaosLoadable
-      : walletAdminOfDaosLoadable
-
-  const daoInfoLoadable = useRecoilValueLoadable(
-    coreAddress && isValidBech32Address(coreAddress, bech32Prefix)
-      ? daoInfoSelector({
+      : undefined,
+    (daos) =>
+      daos.map(
+        (coreAddress): DaoSource => ({
+          chainId,
           coreAddress,
-          chainId,
         })
-      : constSelector(undefined)
+      )
   )
 
-  const options: InnerOptions = {
-    childDaos:
-      childDaosLoadable.state === 'hasValue'
-        ? {
-            loading: false,
-            data: childDaosLoadable.contents.map((dao) =>
-              typeof dao === 'string' ? dao : dao.addr
-            ),
-          }
-        : { loading: true },
-  }
+  const childDaos =
+    context.type === ActionContextType.Dao
+      ? daoSubDaosLoading
+      : walletAdminOfDaosLoading
 
-  return daoInfoLoadable.state === 'hasValue' && !!daoInfoLoadable.contents ? (
-    <SuspenseLoader
-      fallback={<InnerComponentLoading {...props} options={options} />}
-    >
-      <DaoProviders info={daoInfoLoadable.contents}>
-        <InnerComponent {...props} options={options} />
+  return (
+    <>
+      {!props.isCreating ? (
+        <ChainProvider chainId={chainId}>
+          <EntityDisplay address={coreAddress} />
+        </ChainProvider>
+      ) : (
+        <>
+          {(childDaos.loading ||
+            (!childDaos.errored && childDaos.data.length > 0)) && (
+            <RadioInputNoForm<string>
+              loading={childDaos.loading}
+              onChange={(value) => {
+                const [chainId, coreAddress] = value.split(':')
+                setValue(
+                  (props.fieldNamePrefix + 'chainId') as 'chainId',
+                  chainId
+                )
+                setValue(
+                  (props.fieldNamePrefix + 'coreAddress') as 'coreAddress',
+                  coreAddress
+                )
+              }}
+              options={
+                childDaos.loading
+                  ? []
+                  : childDaos.data.map((childDao) => ({
+                      display: (
+                        <ChainProvider chainId={childDao.chainId}>
+                          <EntityDisplay
+                            address={childDao.coreAddress}
+                            hideImage
+                            noCopy
+                          />
+                        </ChainProvider>
+                      ),
+                      value: [childDao.chainId, childDao.coreAddress].join(':'),
+                    }))
+              }
+              selected={[chainId, coreAddress].join(':')}
+            />
+          )}
+
+          {context.type === ActionContextType.Dao && (
+            <DaoSupportedChainPickerInput
+              disabled={!props.isCreating}
+              fieldName={props.fieldNamePrefix + 'chainId'}
+              onlyDaoChainIds
+            />
+          )}
+
+          <InputLabel className="-mb-2" name={t('title.dao')} />
+
+          <ChainProvider chainId={chainId}>
+            <AddressInput
+              error={props.errors?.coreAddress}
+              fieldName={
+                (props.fieldNamePrefix + 'coreAddress') as 'coreAddress'
+              }
+              register={register}
+              type="contract"
+              validation={[makeValidateAddress(bech32Prefix)]}
+            />
+          </ChainProvider>
+        </>
+      )}
+
+      <DaoProviders
+        key={
+          // Make sure to re-render (reset state inside the contexts) when the
+          // selected SubDAO changes.
+          coreAddress || '_'
+        }
+        chainId={chainId}
+        coreAddress={
+          // Loading state if invalid address.
+          coreAddress && isValidBech32Address(coreAddress, bech32Prefix)
+            ? coreAddress
+            : ''
+        }
+        loaderFallback={<InnerComponentLoading {...props} />}
+      >
+        <InnerComponent {...props} />
       </DaoProviders>
-    </SuspenseLoader>
-  ) : (
-    <InnerComponentLoading {...props} options={options} />
+    </>
   )
 }
 
-const useTransformToCosmos: UseTransformToCosmos<DaoAdminExecData> = () =>
-  useCallback(
-    ({ coreAddress, msgs }) =>
-      makeWasmMessage({
-        wasm: {
-          execute: {
-            contract_addr: coreAddress,
-            funds: [],
-            msg: {
-              execute_admin_msgs: {
-                msgs,
-              },
-            },
-          },
-        },
-      }),
-    []
-  )
-
 const useDecodedCosmosMsg: UseDecodedCosmosMsg<DaoAdminExecData> = (
   msg: Record<string, any>
-) =>
-  objectMatchesStructure(msg, {
+) => {
+  let chainId = useActionOptions().chain.chain_id
+  const decodedPolytone = decodePolytoneExecuteMsg(chainId, msg)
+  if (decodedPolytone.match) {
+    chainId = decodedPolytone.chainId
+    msg = decodedPolytone.msg
+  }
+
+  return objectMatchesStructure(msg, {
     wasm: {
       execute: {
         contract_addr: {},
@@ -210,6 +256,7 @@ const useDecodedCosmosMsg: UseDecodedCosmosMsg<DaoAdminExecData> = (
     ? {
         match: true,
         data: {
+          chainId,
           coreAddress: msg.wasm.execute.contract_addr,
           msgs: msg.wasm.execute.msg.execute_admin_msgs.msgs,
         },
@@ -217,25 +264,37 @@ const useDecodedCosmosMsg: UseDecodedCosmosMsg<DaoAdminExecData> = (
     : {
         match: false,
       }
+}
+
+const useTransformToCosmos: UseTransformToCosmos<DaoAdminExecData> = () => {
+  const options = useActionOptions()
+
+  return ({ chainId = options.chain.chain_id, coreAddress, msgs }) =>
+    maybeMakePolytoneExecuteMessage(
+      options.chain.chain_id,
+      chainId,
+      makeExecuteSmartContractMessage({
+        chainId,
+        sender: getChainAddressForActionOptions(options, chainId) || '',
+        contractAddress: coreAddress,
+        msg: {
+          execute_admin_msgs: {
+            msgs,
+          },
+        },
+      })
+    )
+}
 
 export const makeDaoAdminExecAction: ActionMaker<DaoAdminExecData> = ({
   t,
-  context,
-  chainContext,
-}) =>
-  // Only allow using this action in DAOs or gov props on chains with CW.
-  context.type === ActionContextType.Dao ||
-  (context.type === ActionContextType.Gov &&
-    chainContext.type !== ActionChainContextType.Any &&
-    !chainContext.config.noCosmWasm)
-    ? {
-        key: ActionKey.DaoAdminExec,
-        Icon: JoystickEmoji,
-        label: t('title.daoAdminExec'),
-        description: t('info.daoAdminExecDescription'),
-        Component,
-        useDefaults,
-        useTransformToCosmos,
-        useDecodedCosmosMsg,
-      }
-    : null
+}) => ({
+  key: ActionKey.DaoAdminExec,
+  Icon: JoystickEmoji,
+  label: t('title.daoAdminExec'),
+  description: t('info.daoAdminExecDescription'),
+  Component,
+  useDefaults,
+  useTransformToCosmos,
+  useDecodedCosmosMsg,
+})

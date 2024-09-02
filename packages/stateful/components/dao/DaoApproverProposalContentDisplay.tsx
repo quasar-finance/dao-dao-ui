@@ -1,3 +1,4 @@
+import { useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { useRecoilValue } from 'recoil'
 
@@ -6,7 +7,7 @@ import {
   Loader,
   ProposalContentDisplay,
   ProposalContentDisplayProps,
-  WarningCard,
+  StatusCard,
   useChain,
 } from '@dao-dao/stateless'
 import {
@@ -23,7 +24,7 @@ import {
   useProposalModuleAdapter,
   useProposalModuleAdapterContext,
 } from '../../proposal-module-adapter'
-import { daoInfoSelector } from '../../recoil'
+import { daoQueries } from '../../queries/dao'
 import { EntityDisplay } from '../EntityDisplay'
 import { IconButtonLink } from '../IconButtonLink'
 import { SuspenseLoader } from '../SuspenseLoader'
@@ -69,8 +70,8 @@ export const DaoApproverProposalContentDisplay = ({
   const { approvalDao, preProposeApprovalContract } = prePropose.config
 
   const { chain_id: chainId } = useChain()
-  const daoInfo = useRecoilValue(
-    daoInfoSelector({
+  const { data: daoInfo } = useSuspenseQuery(
+    daoQueries.info(useQueryClient(), {
       chainId,
       coreAddress: approvalDao,
     })
@@ -82,7 +83,6 @@ export const DaoApproverProposalContentDisplay = ({
       params: [
         {
           msg: {
-            // pending_proposal_id_for_approval_proposal_id: {
             pre_propose_approval_id_for_approver_proposal_id: {
               id: proposalNumber,
             },
@@ -100,7 +100,7 @@ export const DaoApproverProposalContentDisplay = ({
   }
 
   const creatorAddress = proposalInfo.createdByAddress
-  const entity = useEntity(creatorAddress)
+  const { entity } = useEntity(creatorAddress)
 
   const innerProps: InnerDaoApproverProposalContentDisplayProps = {
     creator: {
@@ -126,14 +126,12 @@ export const DaoApproverProposalContentDisplay = ({
   }
 
   return (
-    <DaoProviders info={daoInfo}>
+    <DaoProviders chainId={chainId} coreAddress={approvalDao}>
       <ProposalModuleAdapterProvider
-        coreAddress={daoInfo.coreAddress}
         proposalId={
           // Add prefix of target proposal module so it matches.
           `${proposalModuleWithPreProposeApproval.prefix}${preProposeApprovalProposalId}`
         }
-        proposalModules={[proposalModuleWithPreProposeApproval]}
       >
         <SuspenseLoader
           fallback={<InnerDaoApproverProposalContentDisplay {...innerProps} />}
@@ -177,10 +175,15 @@ const InnerDaoApproverProposalContentDisplayWithInnerContent = ({
     // Fallback to approval proposal creator passed in from main component.
     props.creator?.address ||
     ''
-  const entity = useEntity(creatorAddress)
+  const { entity } = useEntity(creatorAddress)
 
   if (!PreProposeApprovalInnerContentDisplay) {
-    return <WarningCard content={t('error.unsupportedApprovalFailedRender')} />
+    return (
+      <StatusCard
+        content={t('error.unsupportedApprovalFailedRender')}
+        style="warning"
+      />
+    )
   }
 
   return (

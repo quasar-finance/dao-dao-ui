@@ -3,9 +3,9 @@ import { DaoCreator, DurationUnits } from '@dao-dao/types'
 import { TokenBasedCreatorId } from '@dao-dao/utils'
 
 import { makeActiveThresholdVotingConfigItem } from '../../components/dao/commonVotingConfig/ActiveThresholdVotingConfigItem'
+import { getInstantiateInfo } from './getInstantiateInfo'
 import { GovernanceConfigurationInput } from './GovernanceConfigurationInput'
 import { GovernanceConfigurationReview } from './GovernanceConfigurationReview'
-import { mutate } from './mutate'
 import { CreatorData, GovernanceTokenType } from './types'
 import { UnstakingDurationVotingConfigItem } from './UnstakingDurationVotingConfigItem'
 
@@ -18,7 +18,10 @@ export const TokenBasedCreator: DaoCreator<CreatorData> = {
     suppliesI18nKey: 'daoCreator.TokenBased.supplies',
     membershipI18nKey: 'daoCreator.TokenBased.membership',
   },
-  defaultConfig: {
+  makeDefaultConfig: ({
+    tokenCreationUnderDevelopment = false,
+    noTokenFactory = false,
+  }) => ({
     tiers: [
       {
         name: '',
@@ -30,10 +33,14 @@ export const TokenBasedCreator: DaoCreator<CreatorData> = {
         ],
       },
     ],
-    tokenType: GovernanceTokenType.New,
+    tokenType:
+      tokenCreationUnderDevelopment || noTokenFactory
+        ? GovernanceTokenType.Existing
+        : GovernanceTokenType.New,
     newInfo: {
       initialSupply: 10000000,
       initialTreasuryPercent: 90,
+      maxSupply: 100000000,
       symbol: '',
       name: '',
     },
@@ -47,7 +54,7 @@ export const TokenBasedCreator: DaoCreator<CreatorData> = {
       type: 'percent',
       value: 10,
     },
-  },
+  }),
   governanceConfig: {
     Input: GovernanceConfigurationInput,
     Review: GovernanceConfigurationReview,
@@ -56,5 +63,5 @@ export const TokenBasedCreator: DaoCreator<CreatorData> = {
     items: [UnstakingDurationVotingConfigItem],
     advancedItems: [makeActiveThresholdVotingConfigItem()],
   },
-  mutate,
+  getInstantiateInfo,
 }

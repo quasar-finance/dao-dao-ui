@@ -1,6 +1,7 @@
+import { QueryClient } from '@tanstack/react-query'
 import { atom } from 'recoil'
 
-import { Web3AuthPrompt } from '@dao-dao/types'
+import { PageHeaderProps, Web3AuthPrompt } from '@dao-dao/types'
 
 import { localStorageEffectJSON } from '../effects'
 
@@ -35,6 +36,11 @@ export const updateProfileNftVisibleAtom = atom<boolean>({
   default: false,
 })
 
+export const mergeProfilesVisibleAtom = atom<boolean>({
+  key: 'mergeProfilesVisible',
+  default: false,
+})
+
 export const web3AuthPromptAtom = atom<Web3AuthPrompt | undefined>({
   key: 'web3AuthPrompt',
   default: undefined,
@@ -44,4 +50,22 @@ export const web3AuthPromptAtom = atom<Web3AuthPrompt | undefined>({
 export const isKeplrMobileWebAtom = atom({
   key: 'isKeplrMobileWeb',
   default: false,
+})
+
+export const indexerWebSocketChannelSubscriptionsAtom = atom<
+  Partial<Record<string, number>>
+>({
+  key: 'indexerWebSocketChannelSubscriptions',
+  default: {},
+})
+
+export const pageHeaderPropsAtom = atom<PageHeaderProps>({
+  key: 'pageHeaderProps',
+  default: {},
+})
+
+// Store query client in Recoil atom so it's accessible from Recoil selectors
+// while we migrate from Recoil to React Query.
+export const queryClientAtom = atom<QueryClient>({
+  key: 'queryClient',
 })

@@ -24,7 +24,7 @@ import {
   processError,
 } from '@dao-dao/utils'
 
-import { Cw20BaseHooks, useWallet, useWalletInfo } from '../../hooks'
+import { Cw20BaseHooks, useWallet } from '../../hooks'
 import { ConnectWallet } from '../ConnectWallet'
 
 export type DaoTokenDepositModalProps = Pick<
@@ -42,13 +42,15 @@ export const DaoTokenDepositModal = ({
 }: DaoTokenDepositModalProps) => {
   const { t } = useTranslation()
   const { name: daoName } = useDaoInfoContext()
-  const { isWalletConnected, address, getSigningCosmWasmClient } = useWallet({
+  const {
+    isWalletConnected,
+    address,
+    getSigningStargateClient,
+    refreshBalances: refreshWalletBalances,
+  } = useWallet({
     chainId: token.chainId,
     // Only attempt connection when the modal is visible.
     attemptConnection: props.visible,
-  })
-  const { refreshBalances: refreshWalletBalances } = useWalletInfo({
-    chainId: token.chainId,
   })
 
   const depositAddress = owner.address
@@ -77,7 +79,7 @@ export const DaoTokenDepositModal = ({
         }),
     {
       amount: 0,
-      timestamp: new Date(),
+      timestamp: Date.now(),
     }
   )
 
@@ -109,8 +111,8 @@ export const DaoTokenDepositModal = ({
         )
 
         if (token.type === 'native') {
-          const signingCosmWasmClient = await getSigningCosmWasmClient()
-          await signingCosmWasmClient.sendTokens(
+          const signingClient = await getSigningStargateClient()
+          await signingClient.sendTokens(
             address,
             depositAddress,
             coins(microAmount, token.denomOrAddress),
@@ -154,7 +156,7 @@ export const DaoTokenDepositModal = ({
       refreshDaoBalances,
       refreshWalletBalances,
       setAmount,
-      getSigningCosmWasmClient,
+      getSigningStargateClient,
       t,
       token,
       transferCw20,

@@ -20,6 +20,7 @@ export const Row = ({
   href,
   defaultExpanded = false,
   forceExpanded = false,
+  hideExpand = false,
   compact = false,
   loading = false,
   selected = false,
@@ -89,7 +90,7 @@ export const Row = ({
       <RowWrapper LinkWrapper={LinkWrapper} href={href} shallow={shallow}>
         <div
           className={clsx(
-            'body-text flex flex-row items-center gap-4 p-3 md:gap-3 md:p-2',
+            'body-text flex flex-row items-center gap-3 p-2',
             {
               'cursor-pointer transition-opacity hover:opacity-70 active:opacity-60':
                 onClick || href,
@@ -100,20 +101,20 @@ export const Row = ({
           )}
           onClick={onClick}
         >
-          <div className="relative flex h-8 w-8 items-center justify-center md:h-6 md:w-6">
-            <Icon className="!h-8 !w-8 md:!h-6 md:!w-6" />
+          <div className="relative flex h-6 w-6 items-center justify-center">
+            <Icon className="!h-6 !w-6" />
             {showBadge && (
               <div className="absolute -top-[0.1875rem] -right-[0.1875rem] h-1.5 w-1.5 animate-fade-in rounded-full bg-icon-interactive-active"></div>
             )}
           </div>
 
-          <p className="grow text-base md:text-sm">{label}</p>
+          <p className="grow text-sm">{label}</p>
 
           {/* Override expand button with loader. */}
           {loading ? (
             <Loader className="!justify-end" size={24} />
           ) : // If children exist and not forcing expanded, display expand button.
-          children && !forceExpanded ? (
+          children && !forceExpanded && !hideExpand ? (
             <IconButton
               Icon={ExpandButton}
               className="text-icon-secondary"
@@ -132,7 +133,7 @@ export const Row = ({
         </div>
       </RowWrapper>
 
-      {children && (
+      {children && !hideExpand && (
         // Load in background even when hidden.
         <div className={clsx({ hidden: !expanded })}>{children}</div>
       )}

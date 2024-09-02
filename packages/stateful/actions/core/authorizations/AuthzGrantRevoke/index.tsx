@@ -9,7 +9,7 @@ import {
   KeyEmoji,
   Loader,
 } from '@dao-dao/stateless'
-import { Coin } from '@dao-dao/types'
+import { TokenType, makeStargateMessage } from '@dao-dao/types'
 import {
   ActionComponent,
   ActionContextType,
@@ -19,23 +19,12 @@ import {
   UseDefaults,
   UseTransformToCosmos,
 } from '@dao-dao/types/actions'
-import {
-  convertDenomToMicroDenomWithDecimals,
-  convertMicroDenomToDenomWithDecimals,
-  decodePolytoneExecuteMsg,
-  getChainAddressForActionOptions,
-  getTokenForChainIdAndDenom,
-  isDecodedStargateMsg,
-  makeStargateMessage,
-  maybeMakePolytoneExecuteMessage,
-  objectMatchesStructure,
-} from '@dao-dao/utils'
-import { GenericAuthorization } from '@dao-dao/utils/protobuf/codegen/cosmos/authz/v1beta1/authz'
+import { GenericAuthorization } from '@dao-dao/types/protobuf/codegen/cosmos/authz/v1beta1/authz'
 import {
   MsgGrant,
   MsgRevoke,
-} from '@dao-dao/utils/protobuf/codegen/cosmos/authz/v1beta1/tx'
-import { SendAuthorization } from '@dao-dao/utils/protobuf/codegen/cosmos/bank/v1beta1/authz'
+} from '@dao-dao/types/protobuf/codegen/cosmos/authz/v1beta1/tx'
+import { SendAuthorization } from '@dao-dao/types/protobuf/codegen/cosmos/bank/v1beta1/authz'
 import {
   AcceptedMessageKeysFilter,
   AcceptedMessagesFilter,
@@ -44,10 +33,20 @@ import {
   ContractGrant,
   ContractMigrationAuthorization,
   MaxCallsLimit,
-} from '@dao-dao/utils/protobuf/codegen/cosmwasm/wasm/v1/authz'
-import { Any } from '@dao-dao/utils/protobuf/codegen/google/protobuf/any'
+} from '@dao-dao/types/protobuf/codegen/cosmwasm/wasm/v1/authz'
+import { Any } from '@dao-dao/types/protobuf/codegen/google/protobuf/any'
+import {
+  convertDenomToMicroDenomStringWithDecimals,
+  convertMicroDenomToDenomWithDecimals,
+  decodePolytoneExecuteMsg,
+  getChainAddressForActionOptions,
+  isDecodedStargateMsg,
+  maybeMakePolytoneExecuteMessage,
+  objectMatchesStructure,
+} from '@dao-dao/utils'
 
 import { AddressInput, SuspenseLoader } from '../../../../components'
+import { useQueryTokens } from '../../../../hooks/query'
 import { useTokenBalances } from '../../../hooks'
 import { useActionOptions } from '../../../react'
 import { AuthzGrantRevokeComponent as StatelessAuthzAuthorizationComponent } from './Component'
@@ -133,10 +132,47 @@ export const makeAuthzGrantRevokeAction: ActionMaker<AuthzGrantRevokeData> = (
 
     const defaults = useDefaults() as AuthzGrantRevokeData
 
+    const isStargate = isDecodedStargateMsg(msg)
+    const isGrant = isStargate && msg.stargate.typeUrl === MsgGrant.typeUrl
+    const isRevoke = isStargate && msg.stargate.typeUrl === MsgRevoke.typeUrl
+
+    const grant = isGrant ? (msg.stargate.value as MsgGrant).grant : undefined
+    const grantAuthorizationTypeUrl =
+      grant &&
+      // If not auto-decoded, will be Any. This should be the case for the
+      // CosmWasm contract authorizations. $typeUrl will be Any which is
+      // unhelpful.
+      (grant.authorization?.typeUrl ||
+        // If auto-decoded, such as Generic or Send, this will be set instead.
+        grant.authorization?.$typeUrl)
+
+    const funds =
+      grant && grantAuthorizationTypeUrl
+        ? grantAuthorizationTypeUrl === SendAuthorization.typeUrl
+          ? (grant.authorization as SendAuthorization).spendLimit
+          : grantAuthorizationTypeUrl ===
+              ContractExecutionAuthorization.typeUrl ||
+            grantAuthorizationTypeUrl === ContractMigrationAuthorization.typeUrl
+          ? (
+              grant.authorization as
+                | ContractExecutionAuthorization
+                | ContractMigrationAuthorization
+            ).grants[0]?.limit?.amounts
+          : undefined
+        : undefined
+
+    const tokens = useQueryTokens(
+      funds?.map(({ denom }) => ({
+        chainId,
+        type: TokenType.Native,
+        denomOrAddress: denom,
+      }))
+    )
+
     if (
-      !isDecodedStargateMsg(msg) ||
-      (msg.stargate.typeUrl !== MsgGrant.typeUrl &&
-        msg.stargate.typeUrl !== MsgRevoke.typeUrl) ||
+      (!isGrant && !isRevoke) ||
+      tokens.loading ||
+      tokens.errored ||
       !objectMatchesStructure(msg.stargate.value, {
         grantee: {},
         granter: {},
@@ -145,26 +181,18 @@ export const makeAuthzGrantRevokeAction: ActionMaker<AuthzGrantRevokeData> = (
       return { match: false }
     }
 
-    if (msg.stargate.typeUrl === MsgGrant.typeUrl) {
+    if (isGrant) {
       const grantMsg = msg.stargate.value as MsgGrant
-      const authorizationTypeUrl =
-        // If not auto-decoded, will be Any. This should be the case for the
-        // CosmWasm contract authorizations. $typeUrl will be Any which is
-        // unhelpful.
-        grantMsg.grant?.authorization?.typeUrl ||
-        // If auto-decoded, such as Generic or Send, this will be set instead.
-        grantMsg.grant?.authorization?.$typeUrl
+      const authorizationTypeUrl = grantAuthorizationTypeUrl
 
       // If no authorization type, this is not a match
-      if (!authorizationTypeUrl) {
+      if (!authorizationTypeUrl || !grant) {
         return { match: false }
       }
 
       switch (authorizationTypeUrl) {
         case GenericAuthorization.typeUrl: {
-          const msgTypeUrl = (
-            grantMsg.grant!.authorization as GenericAuthorization
-          ).msg
+          const msgTypeUrl = (grant.authorization as GenericAuthorization).msg
           return {
             match: true,
             data: {
@@ -182,8 +210,7 @@ export const makeAuthzGrantRevokeAction: ActionMaker<AuthzGrantRevokeData> = (
         }
 
         case SendAuthorization.typeUrl: {
-          const { spendLimit } = grantMsg.grant!
-            .authorization as SendAuthorization
+          const { spendLimit } = grant.authorization as SendAuthorization
 
           return {
             match: true,
@@ -194,13 +221,20 @@ export const makeAuthzGrantRevokeAction: ActionMaker<AuthzGrantRevokeData> = (
               authorizationTypeUrl,
               customTypeUrl: false,
               grantee: grantMsg.grantee,
-              funds: spendLimit.map(({ denom, amount }: Coin) => ({
-                amount: convertMicroDenomToDenomWithDecimals(
-                  amount,
-                  getTokenForChainIdAndDenom(chainId, denom).decimals
-                ),
-                denom,
-              })),
+              funds:
+                spendLimit.map(({ denom, amount }) => {
+                  const decimals =
+                    tokens.data.find((t) => t.denomOrAddress === denom)
+                      ?.decimals || 0
+                  return {
+                    denom,
+                    amount: convertMicroDenomToDenomWithDecimals(
+                      amount,
+                      decimals
+                    ),
+                    decimals,
+                  }
+                }) ?? [],
             },
           }
         }
@@ -208,7 +242,7 @@ export const makeAuthzGrantRevokeAction: ActionMaker<AuthzGrantRevokeData> = (
         case ContractExecutionAuthorization.typeUrl:
         case ContractMigrationAuthorization.typeUrl: {
           const grants: ContractGrant[] = (
-            grantMsg.grant!.authorization as
+            grant.authorization as
               | ContractExecutionAuthorization
               | ContractMigrationAuthorization
           ).grants
@@ -250,13 +284,19 @@ export const makeAuthzGrantRevokeAction: ActionMaker<AuthzGrantRevokeData> = (
               customTypeUrl: false,
               grantee: msg.stargate.value.grantee,
               funds:
-                limit.amounts?.map(({ denom, amount }: Coin) => ({
-                  amount: convertMicroDenomToDenomWithDecimals(
-                    amount,
-                    getTokenForChainIdAndDenom(chainId, denom).decimals
-                  ),
-                  denom,
-                })) ?? [],
+                limit.amounts?.map(({ denom, amount }) => {
+                  const decimals =
+                    tokens.data.find((t) => t.denomOrAddress === denom)
+                      ?.decimals || 0
+                  return {
+                    denom,
+                    amount: convertMicroDenomToDenomWithDecimals(
+                      amount,
+                      decimals
+                    ),
+                    decimals,
+                  }
+                }) ?? [],
               contract,
               filterTypeUrl: filter.$typeUrl,
               filterKeys:
@@ -286,16 +326,20 @@ export const makeAuthzGrantRevokeAction: ActionMaker<AuthzGrantRevokeData> = (
         default:
           return { match: false }
       }
-    } else if (msg.stargate.typeUrl === MsgRevoke.typeUrl) {
+    } else if (isRevoke) {
+      const msgTypeUrl = msg.stargate.value.msgTypeUrl
+
       return {
         match: true,
         data: {
           ...defaults,
           chainId,
           mode: 'revoke',
-          customTypeUrl: false,
+          customTypeUrl: !ACTION_TYPES.some(
+            ({ type: { typeUrl } }) => typeUrl === msgTypeUrl
+          ),
           grantee: msg.stargate.value.grantee,
-          msgTypeUrl: msg.stargate.value.msgTypeUrl,
+          msgTypeUrl,
         },
       }
     }
@@ -341,11 +385,11 @@ export const makeAuthzGrantRevokeAction: ActionMaker<AuthzGrantRevokeData> = (
           callsRemaining: BigInt(calls),
           // MaxFundsLimit
           // CombinedLimit
-          amounts: funds.map(({ denom, amount }) => ({
-            amount: convertDenomToMicroDenomWithDecimals(
+          amounts: funds.map(({ denom, amount, decimals }) => ({
+            amount: convertDenomToMicroDenomStringWithDecimals(
               amount,
-              getTokenForChainIdAndDenom(chainId, denom).decimals
-            ).toString(),
+              decimals
+            ),
             denom,
           })),
         })
@@ -358,11 +402,11 @@ export const makeAuthzGrantRevokeAction: ActionMaker<AuthzGrantRevokeData> = (
             // GenericAuthorization
             msg: msgTypeUrl,
             // SendAuthorization
-            spendLimit: funds.map(({ denom, amount }) => ({
-              amount: convertDenomToMicroDenomWithDecimals(
+            spendLimit: funds.map(({ denom, amount, decimals }) => ({
+              amount: convertDenomToMicroDenomStringWithDecimals(
                 amount,
-                getTokenForChainIdAndDenom(chainId, denom).decimals
-              ).toString(),
+                decimals
+              ),
               denom,
             })),
             allowList: [],

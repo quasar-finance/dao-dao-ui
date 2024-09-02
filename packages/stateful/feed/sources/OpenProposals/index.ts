@@ -1,78 +1,67 @@
 import { useCallback } from 'react'
-import {
-  constSelector,
-  useRecoilValueLoadable,
-  useSetRecoilState,
-  waitForAll,
-} from 'recoil'
+import { constSelector, useSetRecoilState, waitForAll } from 'recoil'
 
-import { refreshOpenProposalsAtom } from '@dao-dao/state/recoil'
-import { useCachedLoadable } from '@dao-dao/stateless'
-import { FeedSource, StatefulProposalLineProps } from '@dao-dao/types'
+import {
+  followingDaosSelector,
+  refreshOpenProposalsAtom,
+} from '@dao-dao/state/recoil'
+import {
+  useCachedLoadable,
+  useCachedLoadingWithError,
+} from '@dao-dao/stateless'
+import { FeedSource } from '@dao-dao/types'
 import { webSocketChannelNameForDao } from '@dao-dao/utils'
 
-import { ProposalLine } from '../../../components/ProposalLine'
-import { useOnWebSocketMessage, useSupportedChainWallets } from '../../../hooks'
-import { followingDaosSelector } from '../../../recoil'
+import { useOnWebSocketMessage, useProfile } from '../../../hooks'
+import { OpenProposalsProposalLine } from './OpenProposalsProposalLineProps'
 import { feedOpenProposalsSelector } from './state'
+import { OpenProposalsProposalLineProps } from './types'
 
-export const OpenProposals: FeedSource<StatefulProposalLineProps> = {
+export const OpenProposals: FeedSource<OpenProposalsProposalLineProps> = {
   id: 'open_proposals',
-  Renderer: ProposalLine,
-  useData: (filter) => {
+  Renderer: OpenProposalsProposalLine,
+  useData: () => {
     const setRefresh = useSetRecoilState(refreshOpenProposalsAtom)
     const refresh = useCallback(() => setRefresh((id) => id + 1), [setRefresh])
 
-    const supportedChainWallets = useSupportedChainWallets().filter(
-      ({ chainWallet: { chain } }) =>
-        !filter?.chainId || chain.chain_id === filter.chainId
-    )
+    const { chains, uniquePublicKeys } = useProfile()
 
     const daosWithItemsLoadable = useCachedLoadable(
-      supportedChainWallets.every(({ hexPublicKey }) => hexPublicKey)
-        ? waitForAll(
-            supportedChainWallets.flatMap(
-              ({ chainWallet: { chain, address }, hexPublicKey }) =>
-                address && hexPublicKey
-                  ? feedOpenProposalsSelector({
-                      chainId: chain.chain_id,
-                      address,
-                      hexPublicKey,
-                    })
-                  : []
-            )
-          )
-        : undefined
+      uniquePublicKeys.loading || chains.loading
+        ? undefined
+        : uniquePublicKeys.data.length > 0
+        ? feedOpenProposalsSelector({
+            publicKeys: uniquePublicKeys.data.map(({ publicKey }) => publicKey),
+            profileAddresses: chains.data.map(({ chainId, address }) => ({
+              chainId,
+              address,
+            })),
+          })
+        : constSelector([])
     )
 
-    const followingDaosLoadable = useRecoilValueLoadable(
-      supportedChainWallets.every(({ hexPublicKey }) => hexPublicKey)
+    const followingDaosLoadable = useCachedLoadingWithError(
+      !uniquePublicKeys.loading
         ? waitForAll(
-            supportedChainWallets.flatMap(
-              ({ chainWallet: { chain }, hexPublicKey }) =>
-                hexPublicKey
-                  ? followingDaosSelector({
-                      chainId: chain.chain_id,
-                      walletPublicKey: hexPublicKey,
-                    })
-                  : []
+            uniquePublicKeys.data.map(({ publicKey }) =>
+              followingDaosSelector({
+                walletPublicKey: publicKey,
+              })
             )
           )
-        : constSelector([])
+        : undefined,
+      (data) => data.flat()
     )
 
     // Refresh when any proposal or vote is updated for any of the followed
     // DAOs.
     useOnWebSocketMessage(
-      followingDaosLoadable.state === 'hasValue'
-        ? supportedChainWallets.flatMap(
-            ({ chainWallet: { chain } }, index) =>
-              followingDaosLoadable.contents[index]?.map((coreAddress) =>
-                webSocketChannelNameForDao({
-                  coreAddress,
-                  chainId: chain.chain_id,
-                })
-              ) || []
+      !followingDaosLoadable.loading && !followingDaosLoadable.errored
+        ? followingDaosLoadable.data.map(({ chainId, coreAddress }) =>
+            webSocketChannelNameForDao({
+              chainId,
+              coreAddress,
+            })
           )
         : [],
       ['proposal', 'vote'],
@@ -86,7 +75,7 @@ export const OpenProposals: FeedSource<StatefulProposalLineProps> = {
         daosWithItemsLoadable.updating,
       daosWithItems:
         daosWithItemsLoadable.state === 'hasValue'
-          ? daosWithItemsLoadable.contents.flat()
+          ? daosWithItemsLoadable.contents
           : [],
       refresh,
     }

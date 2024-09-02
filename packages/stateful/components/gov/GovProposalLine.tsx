@@ -1,27 +1,30 @@
 import {
+  ChainProvider,
   GovProposalStatus,
   GovProposalWalletVote,
   ProposalLine as StatelessProposalLine,
   useConfiguredChainContext,
+  useDaoNavHelpers,
   useLoadingGovProposalTimestampInfo,
 } from '@dao-dao/stateless'
-import { GovProposalWithDecodedContent } from '@dao-dao/types'
-import { getGovProposalPath } from '@dao-dao/utils'
-import { ProposalStatus } from '@dao-dao/utils/protobuf/codegen/cosmos/gov/v1beta1/gov'
+import { StatefulGovProposalLineProps } from '@dao-dao/types'
+import { ProposalStatus } from '@dao-dao/types/protobuf/codegen/cosmos/gov/v1beta1/gov'
 
 import { useLoadingGovProposalWalletVoteInfo } from '../../hooks'
 import { LinkWrapper } from '../LinkWrapper'
 
-export type GovProposalLineProps = {
-  proposalId: string
-  proposal: GovProposalWithDecodedContent
-}
+export const GovProposalLine = (props: StatefulGovProposalLineProps) => (
+  <ChainProvider chainId={props.proposal.chainId}>
+    <InnerGovProposalLine {...props} />
+  </ChainProvider>
+)
 
-export const GovProposalLine = (props: GovProposalLineProps) => {
+const InnerGovProposalLine = (props: StatefulGovProposalLineProps) => {
   const { proposalId, proposal } = props
   const {
     config: { name },
   } = useConfiguredChainContext()
+  const { getDaoProposalPath } = useDaoNavHelpers()
 
   const loadingTimestampInfo = useLoadingGovProposalTimestampInfo(
     proposal.proposal
@@ -34,7 +37,7 @@ export const GovProposalLine = (props: GovProposalLineProps) => {
       Status={(props) => (
         <GovProposalStatus {...props} status={proposal.proposal.status} />
       )}
-      href={getGovProposalPath(name, proposalId)}
+      href={getDaoProposalPath(name, proposalId)}
       proposalNumber={Number(proposalId)}
       proposalPrefix=""
       timestampDisplay={

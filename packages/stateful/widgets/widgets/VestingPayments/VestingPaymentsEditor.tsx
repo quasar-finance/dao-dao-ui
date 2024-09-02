@@ -8,12 +8,12 @@ import {
   Button,
   ChainLabel,
   ChainProvider,
+  InputErrorMessage,
   Tooltip,
-  useDaoInfoContext,
   useSupportedChainContext,
 } from '@dao-dao/stateless'
 import {
-  ActionComponentProps,
+  AccountType,
   ActionKey,
   LATEST_VESTING_CONTRACT_VERSION,
   VestingPaymentsWidgetData,
@@ -52,18 +52,24 @@ export const VestingPaymentsEditor = (
 
   // A DAO can create a vesting payment factory on the current chain and any
   // polytone connection that is also a supported chain (since the vesting
-  // factory+contract only exists on supported chains).
-  const possibleChainIds = [
-    nativeChainId,
-    ...Object.keys(polytone).filter((chainId) =>
-      getSupportedChainConfig(chainId)
-    ),
-  ]
+  // factory+contract only exists on supported chains). When creating a DAO, no
+  // cross-chain accounts exist or can be created, so only show the native
+  // chain.
+  const possibleChainIds =
+    props.type === 'daoCreation'
+      ? [nativeChainId]
+      : [
+          nativeChainId,
+          ...Object.keys(polytone).filter((chainId) =>
+            getSupportedChainConfig(chainId)
+          ),
+        ]
 
   // Prevent action from being submitted if the vesting factories map does not
   // exist.
+  const factoriesExist = factories && Object.keys(factories).length > 0
   useEffect(() => {
-    if (!factories) {
+    if (!factoriesExist) {
       setError((props.fieldNamePrefix + 'factories') as 'factories', {
         type: 'manual',
         message: t('error.noVestingManagersCreated'),
@@ -71,7 +77,7 @@ export const VestingPaymentsEditor = (
     } else {
       clearErrors((props.fieldNamePrefix + 'factories') as 'factories')
     }
-  }, [setError, clearErrors, t, props.fieldNamePrefix, factories])
+  }, [setError, clearErrors, t, props.fieldNamePrefix, factoriesExist])
 
   // Whether or not any of the factories are on an old version.
   const hasUpdate = factories
@@ -85,8 +91,12 @@ export const VestingPaymentsEditor = (
   return (
     <div className="mt-2 flex flex-col items-start gap-4">
       <p className="body-text max-w-prose break-words">
-        {t('info.vestingManagerExplanation')}
+        {t('info.vestingManagerExplanation', {
+          context: props.type,
+        })}
       </p>
+
+      <InputErrorMessage error={props.errors?.factories} />
 
       {possibleChainIds.map((chainId) => (
         <VestingFactoryChain key={chainId} {...props} chainId={chainId} />
@@ -99,34 +109,32 @@ export const VestingPaymentsEditor = (
   )
 }
 
-type VestingFactoryChainProps = {
+type VestingFactoryChainProps = WidgetEditorProps<VestingPaymentsWidgetData> & {
   /**
    * Chain ID.
    */
   chainId: string
-} & Pick<
-  ActionComponentProps,
-  'isCreating' | 'fieldNamePrefix' | 'addAction' | 'allActionsWithData'
->
+}
 
 const VestingFactoryChain = ({
   chainId,
   isCreating,
   fieldNamePrefix,
-  addAction,
-  allActionsWithData,
+  ...props
 }: VestingFactoryChainProps) => {
   const { t } = useTranslation()
-  const { name, chainId: nativeChainId, accounts } = useDaoInfoContext()
+  const nativeChainId =
+    props.accounts.find((a) => a.type === AccountType.Native)?.chainId ||
+    props.accounts[0].chainId
   const daoChainAccountAddress = getAccountAddress({
-    accounts,
+    accounts: props.accounts,
     chainId,
   })
   const { codeIds } = mustGetSupportedChainConfig(chainId)
   const {
     address: walletAddress,
     isWalletConnected,
-    getSigningCosmWasmClient,
+    getSigningClient,
   } = useWallet({
     chainId,
   })
@@ -187,14 +195,16 @@ const VestingFactoryChain = ({
     setInstantiating(true)
     try {
       const createdFactoryAddress = await instantiateSmartContract(
-        await getSigningCosmWasmClient(),
+        getSigningClient,
         walletAddress,
         codeIds.CwPayrollFactory,
-        `DAO_${name}_VestingFactory-v${LATEST_VESTING_CONTRACT_VERSION}_${chainId}`,
+        `VestingFactory-v${LATEST_VESTING_CONTRACT_VERSION}_${chainId}_${Date.now()}`,
         {
           owner: daoChainAccountAddress,
           vesting_code_id: codeIds.CwVesting,
-        } as VestingFactoryInstantiateMsg
+        } as VestingFactoryInstantiateMsg,
+        undefined,
+        daoChainAccountAddress
       )
 
       // If factory already set, add to list of old factories.
@@ -250,11 +260,13 @@ const VestingFactoryChain = ({
     return null
   }
 
-  const crossChainAccountActionExists = allActionsWithData.some(
-    (action) =>
-      action.actionKey === ActionKey.CreateCrossChainAccount &&
-      action.data?.chainId === chainId
-  )
+  const crossChainAccountActionExists =
+    props.type === 'action' &&
+    props.allActionsWithData.some(
+      (action) =>
+        action.actionKey === ActionKey.CreateCrossChainAccount &&
+        action.data?.chainId === chainId
+    )
 
   return (
     <div className="flex flex-col items-start gap-x-4 gap-y-2 xs:flex-row xs:items-center">
@@ -268,12 +280,12 @@ const VestingFactoryChain = ({
         chainFactory?.version === LATEST_VESTING_CONTRACT_VERSION ? (
           <Check className="!h-6 !w-6" />
         ) : // If DAO does not have cross-chain account, add button to create action.
-        !daoChainAccountAddress ? (
+        props.type === 'action' && !daoChainAccountAddress ? (
           <Tooltip title={t('info.vestingCrossChainAccountCreationTooltip')}>
             <Button
               disabled={crossChainAccountActionExists}
               onClick={() =>
-                addAction?.({
+                props.addAction?.({
                   actionKey: ActionKey.CreateCrossChainAccount,
                   data: {
                     chainId,

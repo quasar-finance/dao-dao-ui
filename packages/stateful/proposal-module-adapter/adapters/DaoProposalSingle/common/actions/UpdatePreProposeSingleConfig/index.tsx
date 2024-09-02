@@ -13,7 +13,8 @@ import {
   ActionKey,
   ActionMaker,
   DepositRefundPolicy,
-  ProposalModule,
+  Feature,
+  IProposalModuleBase,
   TokenType,
   UseDecodedCosmosMsg,
   UseDefaults,
@@ -26,9 +27,10 @@ import {
 import {
   ContractName,
   DAO_PRE_PROPOSE_SINGLE_CONTRACT_NAMES,
-  convertDenomToMicroDenomWithDecimals,
+  convertDenomToMicroDenomStringWithDecimals,
   convertMicroDenomToDenomWithDecimals,
   getNativeTokenForChainId,
+  isFeatureSupportedByVersion,
   isValidBech32Address,
   makeWasmMessage,
 } from '@dao-dao/utils'
@@ -123,7 +125,7 @@ export const Component: ActionComponent = (props) => {
 export const makeUpdatePreProposeSingleConfigActionMaker =
   ({
     prePropose,
-  }: ProposalModule): ActionMaker<UpdatePreProposeSingleConfigData> =>
+  }: IProposalModuleBase): ActionMaker<UpdatePreProposeSingleConfigData> =>
   ({ t, chain: { chain_id: chainId } }) => {
     // Only when pre propose is used.
     if (
@@ -221,7 +223,12 @@ export const makeUpdatePreProposeSingleConfigActionMaker =
       return {
         depositRequired,
         depositInfo,
-        anyoneCanPropose: config.open_proposal_submission,
+        anyoneCanPropose: isFeatureSupportedByVersion(
+          Feature.GranularSubmissionPolicy,
+          prePropose.version
+        )
+          ? !!config.submission_policy && 'anyone' in config.submission_policy
+          : !!config.open_proposal_submission,
       }
     }
 
@@ -246,10 +253,10 @@ export const makeUpdatePreProposeSingleConfigActionMaker =
             update_config: {
               deposit_info: depositRequired
                 ? {
-                    amount: convertDenomToMicroDenomWithDecimals(
+                    amount: convertDenomToMicroDenomStringWithDecimals(
                       depositInfo.amount,
                       depositInfo.token?.decimals ?? 0
-                    ).toString(),
+                    ),
                     denom:
                       depositInfo.type === 'voting_module_token'
                         ? {
@@ -279,7 +286,28 @@ export const makeUpdatePreProposeSingleConfigActionMaker =
                     refund_policy: depositInfo.refundPolicy,
                   }
                 : null,
-              open_proposal_submission: anyoneCanPropose,
+              ...(isFeatureSupportedByVersion(
+                Feature.GranularSubmissionPolicy,
+                prePropose.version
+              )
+                ? {
+                    submission_policy: anyoneCanPropose
+                      ? {
+                          anyone: {
+                            denylist: [],
+                          },
+                        }
+                      : {
+                          specific: {
+                            dao_members: true,
+                            allowlist: [],
+                            denylist: [],
+                          },
+                        },
+                  }
+                : {
+                    open_proposal_submission: anyoneCanPropose,
+                  }),
             },
           }
 
@@ -305,7 +333,6 @@ export const makeUpdatePreProposeSingleConfigActionMaker =
         {
           update_config: {
             deposit_info: {},
-            open_proposal_submission: {},
           },
         }
       )
@@ -343,7 +370,17 @@ export const makeUpdatePreProposeSingleConfigActionMaker =
       }
 
       const anyoneCanPropose =
-        !!msg.wasm.execute.msg.update_config.open_proposal_submission
+        // < v2.5.0
+        'open_proposal_submission' in msg.wasm.execute.msg.update_config
+          ? !!msg.wasm.execute.msg.update_config.open_proposal_submission
+          : // >= v2.5.0
+          'submission_policy' in msg.wasm.execute.msg.update_config
+          ? 'anyone' in msg.wasm.execute.msg.update_config.submission_policy
+          : undefined
+
+      if (anyoneCanPropose === undefined) {
+        return { match: false }
+      }
 
       if (!configDepositInfo || !token.data) {
         return {

@@ -15,6 +15,14 @@ export const LEGACY_URL_PREFIX = process.env
 // True if on mainnet, false if on testnet.
 export const MAINNET = process.env.NEXT_PUBLIC_MAINNET === 'true'
 
+// Neutron DAOs.
+export const NEUTRON_GOVERNANCE_DAO = MAINNET
+  ? 'neutron1suhgf5svhu4usrurvxzlgn54ksxmn8gljarjtxqnapv8kjnp4nrstdxvff'
+  : 'neutron1kvxlf27r0h7mzjqgdydqdf76dtlyvwz6u9q8tysfae53ajv8urtq4fdkvy'
+export const NEUTRON_SECURITY_SUBDAO = MAINNET
+  ? 'neutron1fuyxwxlsgjkfjmxfthq8427dm2am3ya3cwcdr8gls29l7jadtazsuyzwcc'
+  : 'neutron1zv35zgj7d6khqxfl3tx95scjljz0rvmkxcsxmggqxrltkm8ystsqvt0qc7'
+
 export const DAO_DAO_DAO_ADDRESS = process.env
   .NEXT_PUBLIC_DAO_DAO_DAO_ADDRESS as string
 
@@ -35,14 +43,16 @@ export const STARGAZE_NAMES_CONTRACT = process.env
 // Wallet profiles
 export const PFPK_API_BASE = process.env.NEXT_PUBLIC_PFPK_API_BASE as string
 
-// Indexer
-export const INDEXER_URL = process.env.NEXT_PUBLIC_INDEXER_URL
-
 // Search
 export const SEARCH_HOST = process.env.NEXT_PUBLIC_SEARCH_HOST as string
 export const SEARCH_API_KEY = process.env.NEXT_PUBLIC_SEARCH_API_KEY as string
 
-export const NFT_STORAGE_API_KEY = process.env.NFT_STORAGE_API_KEY as string
+// Filebase
+export const FILEBASE_ACCESS_KEY_ID = process.env
+  .FILEBASE_ACCESS_KEY_ID as string
+export const FILEBASE_SECRET_ACCESS_KEY = process.env
+  .FILEBASE_SECRET_ACCESS_KEY as string
+export const FILEBASE_BUCKET = process.env.FILEBASE_BUCKET as string
 
 export const FAST_AVERAGE_COLOR_API_TEMPLATE = process.env
   .NEXT_PUBLIC_FAST_AVERAGE_COLOR_API_TEMPLATE as string

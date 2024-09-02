@@ -17,8 +17,7 @@ import { ProposalResponse as ProposalV1Response } from '@dao-dao/types/contracts
 import { Proposal as DaoPreProposeApprovalSingleProposal } from '@dao-dao/types/contracts/DaoPreProposeApprovalSingle'
 import { ProposalResponse as ProposalV2Response } from '@dao-dao/types/contracts/DaoProposalSingle.v2'
 import {
-  cosmWasmClientRouter,
-  getRpcForChainId,
+  getCosmWasmClientForChainId,
   parseContractVersion,
 } from '@dao-dao/utils'
 
@@ -34,9 +33,7 @@ export const makeGetProposalInfo =
     let _cosmWasmClient: CosmWasmClient
     const getCosmWasmClient = async () => {
       if (!_cosmWasmClient) {
-        _cosmWasmClient = await cosmWasmClientRouter.connect(
-          getRpcForChainId(chainId)
-        )
+        _cosmWasmClient = await getCosmWasmClientForChainId(chainId)
       }
       return _cosmWasmClient
     }
@@ -193,11 +190,16 @@ export const makeGetProposalInfo =
     }
     // If indexer fails, fallback to querying block info from chain.
     if (!createdAtEpoch) {
-      createdAtEpoch = new Date(
-        (
-          await (await getCosmWasmClient()).getBlock(proposal.start_height)
-        ).header.time
-      ).getTime()
+      try {
+        createdAtEpoch = new Date(
+          (
+            await (await getCosmWasmClient()).getBlock(proposal.start_height)
+          ).header.time
+        ).getTime()
+      } catch (err) {
+        // Ignore error.
+        console.error(err)
+      }
     }
 
     return {

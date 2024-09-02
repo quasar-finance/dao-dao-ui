@@ -1,8 +1,8 @@
+import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useMemo } from 'react'
 import { useFormContext } from 'react-hook-form'
-import { constSelector, useRecoilValueLoadable } from 'recoil'
 
-import { isDaoSelector } from '@dao-dao/state/recoil'
+import { contractQueries } from '@dao-dao/state/query'
 import {
   ChainProvider,
   DaoSupportedChainPickerInput,
@@ -14,22 +14,24 @@ import {
   ActionContextType,
   ActionKey,
   ActionMaker,
-  CosmosMsgFor_Empty,
+  UnifiedCosmosMsg,
   UseDecodedCosmosMsg,
   UseDefaults,
   UseTransformToCosmos,
-} from '@dao-dao/types'
-import {
   cwMsgToProtobuf,
+  makeStargateMessage,
+  protobufToCwMsg,
+} from '@dao-dao/types'
+import { MsgExec } from '@dao-dao/types/protobuf/codegen/cosmos/authz/v1beta1/tx'
+import {
   decodePolytoneExecuteMsg,
   getChainAddressForActionOptions,
+  getChainForChainId,
   isDecodedStargateMsg,
-  makeStargateMessage,
+  isValidBech32Address,
   maybeMakePolytoneExecuteMessage,
   objectMatchesStructure,
-  protobufToCwMsg,
 } from '@dao-dao/utils'
-import { MsgExec } from '@dao-dao/utils/protobuf/codegen/cosmos/authz/v1beta1/tx'
 
 import {
   AddressInput,
@@ -37,7 +39,7 @@ import {
   EntityDisplay,
   SuspenseLoader,
 } from '../../../../components'
-import { daoInfoSelector } from '../../../../recoil'
+import { useQueryLoadingData } from '../../../../hooks'
 import {
   WalletActionsProvider,
   useActionOptions,
@@ -95,32 +97,36 @@ const InnerComponentWrapper: ActionComponent<
   const {
     options: { address },
   } = props
-  const { chain_id: chainId } = useChain()
+  const { chain_id: chainId, bech32_prefix: bech32Prefix } = useChain()
 
-  const isDaoLoadable = useRecoilValueLoadable(
-    isDaoSelector({
-      address,
-      chainId,
-    })
-  )
-  const daoInfoLoadable = useRecoilValueLoadable(
-    isDaoLoadable.state === 'hasValue' && isDaoLoadable.contents
-      ? daoInfoSelector({
-          chainId,
-          coreAddress: address,
-        })
-      : constSelector(undefined)
+  const isDao = useQueryLoadingData(
+    contractQueries.isDao(
+      useQueryClient(),
+      address && isValidBech32Address(address, bech32Prefix)
+        ? {
+            chainId,
+            address,
+          }
+        : undefined
+    ),
+    false
   )
 
-  return isDaoLoadable.state === 'loading' ||
-    daoInfoLoadable.state === 'loading' ? (
+  return isDao.loading ? (
     <InnerComponentLoading {...props} />
-  ) : daoInfoLoadable.state === 'hasValue' && daoInfoLoadable.contents ? (
-    <SuspenseLoader fallback={<InnerComponentLoading {...props} />}>
-      <DaoProviders info={daoInfoLoadable.contents}>
-        <InnerComponent {...props} />
-      </DaoProviders>
-    </SuspenseLoader>
+  ) : isDao.data ? (
+    <DaoProviders
+      key={
+        // Make sure to re-render (reset state inside the contexts) when the
+        // address changes.
+        address
+      }
+      chainId={chainId}
+      coreAddress={address}
+      loaderFallback={<InnerComponentLoading {...props} />}
+    >
+      <InnerComponent {...props} />
+    </DaoProviders>
   ) : (
     <WalletActionsProvider address={address}>
       <InnerComponent {...props} />
@@ -133,7 +139,7 @@ const Component: ActionComponent = (props) => {
 
   // Load DAO info for chosen DAO.
   const { watch } = useFormContext<AuthzExecData>()
-  const address = watch((props.fieldNamePrefix + 'address') as 'address')
+  const address = watch((props.fieldNamePrefix + 'address') as 'address') || ''
   const msgsPerSender =
     watch((props.fieldNamePrefix + '_msgs') as '_msgs') ?? []
 
@@ -152,7 +158,8 @@ const Component: ActionComponent = (props) => {
         />
       )}
 
-      <ChainProvider chainId={chainId}>
+      {/* Re-render when chain changes so hooks and state reset. */}
+      <ChainProvider key={chainId} chainId={chainId}>
         {props.isCreating ? (
           <InnerComponentWrapper
             {...props}
@@ -219,7 +226,7 @@ export const makeAuthzExecAction: ActionMaker<AuthzExecData> = (options) => {
 
       // Group adjacent messages by sender, preserving message order.
       const msgsPerSender = execMsg.msgs
-        .map((msg) => protobufToCwMsg(msg))
+        .map((msg) => protobufToCwMsg(getChainForChainId(chainId), msg))
         .reduce(
           (acc, { msg, sender }) => {
             const last = acc[acc.length - 1]
@@ -232,7 +239,7 @@ export const makeAuthzExecAction: ActionMaker<AuthzExecData> = (options) => {
           },
           [] as {
             sender: string
-            msgs: CosmosMsgFor_Empty[]
+            msgs: UnifiedCosmosMsg[]
           }[]
         )
 
@@ -262,7 +269,7 @@ export const makeAuthzExecAction: ActionMaker<AuthzExecData> = (options) => {
               typeUrl: MsgExec.typeUrl,
               value: {
                 grantee: getChainAddressForActionOptions(options, chainId),
-                msgs: msgs.map((msg) => cwMsgToProtobuf(msg, address)),
+                msgs: msgs.map((msg) => cwMsgToProtobuf(chainId, msg, address)),
               } as MsgExec,
             },
           })

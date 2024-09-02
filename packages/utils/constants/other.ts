@@ -1,7 +1,5 @@
 // Constants NOT derived from environment variables.
 
-import { ChainId } from '@dao-dao/types'
-
 export const SITE_IMAGE = '/social.jpg'
 export const SITE_TITLE = 'DAO DAO'
 export const DEFAULT_SITE_DESCRIPTION =
@@ -15,11 +13,11 @@ export const ACCOUNT_PAGE_DESCRIPTION =
 export const NOTIFICATIONS_PAGE_TITLE = 'Notifications'
 export const NOTIFICATIONS_PAGE_DESCRIPTION =
   'View notifications in your followed DAOs.'
-export const ME_PAGE_TITLE = 'Account'
-export const ME_PAGE_DESCRIPTION =
-  'View your tokens, NFTs, and DAOs, or execute transactions from your wallet.'
 export const STATUS_PAGE_TITLE = 'Status'
 export const STATUS_PAGE_DESCRIPTION = "Check the status of DAO DAO's services."
+export const CHAIN_GOVERNANCE_TITLE = 'Chain governance'
+export const CHAIN_GOVERNANCE_DESCRIPTION =
+  'View and vote on proposals in chain governance.'
 
 // 3 days
 export const IBC_TIMEOUT_SECONDS = 3 * 24 * 60 * 60
@@ -39,7 +37,12 @@ export const MAX_NUM_PROPOSAL_CHOICES = 20
 // Discord notifier (https://github.com/DA0-DA0/discord-notifier-cf-worker)
 export const DISCORD_NOTIFIER_SIGNATURE_TYPE = 'Discord Notifier'
 
-// Following DAOs
+/**
+ * Prefix for the following DAOs storage in kvpk. A DAO is being followed if
+ * `following:CHAIN_ID:KEY` is set, where KEY is a DAO's core address or the
+ * name of a chain, which represents following the chain's native governance
+ * (x/gov module).
+ */
 export const FOLLOWING_DAOS_PREFIX = 'following:'
 
 // The key for the item in the DAO core contract that contains the payroll
@@ -87,6 +90,9 @@ export const WHITE_WHALE_PRICES_API =
 export const ASTROPORT_PRICES_API =
   'https://api.astroport.fi/api/tokens/DENOM?chainId=neutron-1'
 
+// Indexer
+export const INDEXER_URL = 'https://indexer.daodao.zone'
+
 // Snapper API
 export const SNAPPER_API_BASE = 'https://snapper.daodao.zone'
 
@@ -98,13 +104,9 @@ export const ICA_CHAINS_TX_PREFIX = 'ica:'
 
 export const CHAIN_GAS_MULTIPLIER = 2
 
-// Neutron DAOs.
-export const NEUTRON_GOVERNANCE_DAO =
-  'neutron1suhgf5svhu4usrurvxzlgn54ksxmn8gljarjtxqnapv8kjnp4nrstdxvff'
-export const NEUTRON_SECURITY_SUBDAO =
-  'neutron1fuyxwxlsgjkfjmxfthq8427dm2am3ya3cwcdr8gls29l7jadtazsuyzwcc'
-
 export const IPFS_GATEWAY_TEMPLATE = 'https://ipfs.daodao.zone/ipfs/PATH'
+
+export const SKIP_API_BASE = 'https://api.skip.money'
 
 // DAOs with these names will be excluded from search.
 export const INACTIVE_DAO_NAMES = ['[archived]', '[deleted]']
@@ -159,18 +161,10 @@ export const DISTRIBUTION_COLORS_EVERY_OTHER = [
   '#F4925A', // 9
 ]
 
-// Legitimate SubDAOs with the chain governance module set as their admin. This
-// is necessray because chains cannot recognize SubDAOs as they are not DAO
-// contracts, and we need to establish which SubDAOs of a DAO are legitimate for
-// safety.
-export const CHAIN_SUBDAOS: Record<string, string[] | undefined> = {
-  [ChainId.JunoMainnet]: [
-    'juno1nmezpepv3lx45mndyctz2lzqxa6d9xzd2xumkxf7a6r4nxt0y95qypm6c0',
-    'juno1gyjl26rnqqyk6cuh6nqtvx8t885jgqagusvpqpvtgaygcjg2wjdqz0rzle',
-    'juno1n34v729jqgysm5w0unukpt4kvqu4wqyacsv4krmd40f7pz5ruzwqau7e6m',
-    'juno1mjsgk02jyn72jm2x7fgw72uu9wj7xy0v6pnuj2jd3aq7rgeqg5qq4dnhes',
-  ],
-}
+/**
+ * Error substrings that indicate a query does not exist.
+ */
+export const NONEXISTENT_QUERY_ERROR_SUBSTRINGS = ['unknown query path']
 
 /**
  * Error substrings that indicate a contract is invalid or does not exist.
@@ -178,7 +172,35 @@ export const CHAIN_SUBDAOS: Record<string, string[] | undefined> = {
 export const INVALID_CONTRACT_ERROR_SUBSTRINGS = [
   'Error parsing into type',
   'no such contract',
-  'not found: invalid request',
-  'unknown query path',
+  'not found',
   'decoding bech32 failed',
+  ...NONEXISTENT_QUERY_ERROR_SUBSTRINGS,
 ]
+
+/**
+ * The salt used to generate a predictable Valence account address.
+ */
+export const VALENCE_INSTANTIATE2_SALT = 'valence'
+
+/**
+ * DAOs allowed to use the Valence Rebalancer.
+ */
+export const VALENCE_ALLOWLIST = [
+  // NEWT DAO
+  'neutron1lqhw66n563pr2vszv4zqhjp7akwpd74vfj5gukh2crw45t5kfmvsa96ujv',
+]
+
+/**
+ * Gas prices for Secret transactions.
+ */
+export const SECRET_GAS = {
+  DAO_CREATION: 1_000_000,
+  PROPOSE: 1_000_000,
+  VOTE: 500_000,
+  EXECUTE: 1_000_000,
+  CLOSE: 500_000,
+  VETO: 500_000,
+  STAKE: 100_000,
+  UNSTAKE: 100_000,
+  CLAIM: 100_000,
+}

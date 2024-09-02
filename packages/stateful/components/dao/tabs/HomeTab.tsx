@@ -6,26 +6,26 @@ import {
   DaoSplashHeader,
   useAppContext,
   useCachedLoadable,
-  useChain,
-  useDaoInfoContext,
+  useDaoContext,
 } from '@dao-dao/stateless'
 import { CheckedDepositInfo, DaoPageMode } from '@dao-dao/types'
 
-import { useWallet } from '../../../hooks'
+import { useDaoWithWalletSecretNetworkPermit } from '../../../hooks'
 import { matchAndLoadCommon } from '../../../proposal-module-adapter'
 import { useVotingModuleAdapter } from '../../../voting-module-adapter'
 import { ButtonLink } from '../../ButtonLink'
 import { ConnectWallet } from '../../ConnectWallet'
 import { LinkWrapper } from '../../LinkWrapper'
+import { CreateDaoPermit } from '../CreateDaoPermit'
 import { DaoWidgets } from '../DaoWidgets'
 import { MainDaoInfoCards } from '../MainDaoInfoCards'
 
 export const HomeTab = () => {
   const { t } = useTranslation()
-  const chain = useChain()
-  const daoInfo = useDaoInfoContext()
+  const { dao } = useDaoContext()
   const { mode } = useAppContext()
-  const { isWalletConnected } = useWallet()
+  const { isWalletConnected, isSecretNetworkPermitNeeded } =
+    useDaoWithWalletSecretNetworkPermit()
 
   const {
     components: { ProfileCardMemberInfo },
@@ -34,14 +34,11 @@ export const HomeTab = () => {
 
   const depositInfoSelectors = useMemo(
     () =>
-      daoInfo.proposalModules.map(
+      dao.proposalModules.map(
         (proposalModule) =>
-          matchAndLoadCommon(proposalModule, {
-            chain,
-            coreAddress: daoInfo.coreAddress,
-          }).selectors.depositInfo
+          matchAndLoadCommon(dao, proposalModule.address).selectors.depositInfo
       ),
-    [chain, daoInfo.coreAddress, daoInfo.proposalModules]
+    [dao]
   )
   const proposalModuleDepositInfosLoadable = useCachedLoadable(
     waitForAll(depositInfoSelectors)
@@ -73,21 +70,23 @@ export const HomeTab = () => {
         <DaoSplashHeader
           ButtonLink={ButtonLink}
           LinkWrapper={LinkWrapper}
-          daoInfo={daoInfo}
+          daoInfo={dao.info}
         />
       )}
 
       <p className="title-text mt-2">{t('title.membership')}</p>
 
       <div className="w-full rounded-md bg-background-tertiary p-4 md:w-2/3 lg:w-1/2">
-        {isWalletConnected ? (
+        {isWalletConnected && !isSecretNetworkPermitNeeded ? (
           <ProfileCardMemberInfo
             maxGovernanceTokenDeposit={
               maxGovernanceTokenProposalModuleDeposit > 0
-                ? maxGovernanceTokenProposalModuleDeposit.toString()
+                ? BigInt(maxGovernanceTokenProposalModuleDeposit).toString()
                 : undefined
             }
           />
+        ) : isSecretNetworkPermitNeeded ? (
+          <CreateDaoPermit />
         ) : (
           <>
             <p className="body-text mb-3">{t('info.logInToViewMembership')}</p>

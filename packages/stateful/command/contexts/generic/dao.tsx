@@ -5,18 +5,15 @@ import {
   HomeOutlined,
   InboxOutlined,
 } from '@mui/icons-material'
+import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useRecoilState } from 'recoil'
 import useDeepCompareEffect from 'use-deep-compare-effect'
 
 import { navigatingToHrefAtom } from '@dao-dao/state'
-import {
-  useCachedLoading,
-  useDaoInfoContext,
-  useDaoNavHelpers,
-} from '@dao-dao/stateless'
-import { Feature } from '@dao-dao/types'
+import { useDaoInfoContext, useDaoNavHelpers } from '@dao-dao/stateless'
+import { AccountType, ContractVersion, Feature } from '@dao-dao/types'
 import {
   CommandModalContextMaker,
   CommandModalContextSection,
@@ -25,9 +22,14 @@ import {
 } from '@dao-dao/types/command'
 import { getDisplayNameForChainId, getFallbackImage } from '@dao-dao/utils'
 
-import { DaoProvidersWithoutInfo } from '../../../components'
-import { useDaoTabs, useFollowingDaos } from '../../../hooks'
-import { subDaoInfosSelector } from '../../../recoil'
+import { DaoProviders } from '../../../components'
+import {
+  useDaoTabs,
+  useFollowingDaos,
+  useGovDaoTabs,
+  useQueryLoadingData,
+} from '../../../hooks'
+import { daoQueries } from '../../../queries'
 
 export const makeGenericDaoContext: CommandModalContextMaker<{
   dao: CommandModalDaoInfo
@@ -36,21 +38,27 @@ export const makeGenericDaoContext: CommandModalContextMaker<{
    */
   onDaoPage?: boolean
 }> = ({
-  dao: { chainId, coreAddress, name, imageUrl },
+  dao: { chainId, coreAddress, coreVersion, name, imageUrl },
   onDaoPage,
   ...options
 }) => {
+  const useLoadingTabs =
+    coreVersion === ContractVersion.Gov ? useGovDaoTabs : useDaoTabs
+
   const useSections = () => {
     const { t } = useTranslation()
     const { getDaoPath, getDaoProposalPath, router } = useDaoNavHelpers()
     const { accounts, supportedFeatures } = useDaoInfoContext()
-    const loadingTabs = useDaoTabs()
+    const loadingTabs = useLoadingTabs()
 
     const { isFollowing, setFollowing, setUnfollowing, updatingFollowing } =
-      useFollowingDaos(chainId)
-    const following = isFollowing(coreAddress)
+      useFollowingDaos()
+    const following = isFollowing({
+      chainId,
+      coreAddress,
+    })
 
-    const [copied, setCopied] = useState<string | undefined>()
+    const [copied, setCopied] = useState<number | undefined>()
     // Debounce clearing copied.
     useEffect(() => {
       const timeout = setTimeout(() => setCopied(undefined), 2000)
@@ -62,15 +70,19 @@ export const makeGenericDaoContext: CommandModalContextMaker<{
     const daoPageHref = getDaoPath(coreAddress)
     const createProposalHref = getDaoProposalPath(coreAddress, 'create')
 
-    const subDaosLoading = useCachedLoading(
-      supportedFeatures[Feature.SubDaos]
-        ? subDaoInfosSelector({
+    const queryClient = useQueryClient()
+    const subDaosLoading = useQueryLoadingData(
+      coreVersion === ContractVersion.Gov
+        ? daoQueries.chainSubDaoInfos(queryClient, {
             chainId,
-            coreAddress,
           })
-        : // Passing undefined here returns an infinite loading state, which is
-          // fine because it's never used.
-          undefined,
+        : {
+            ...daoQueries.subDaoInfos(queryClient, {
+              chainId,
+              coreAddress,
+            }),
+            enabled: !!supportedFeatures[Feature.SubDaos],
+          },
       []
     )
 
@@ -132,22 +144,29 @@ export const makeGenericDaoContext: CommandModalContextMaker<{
           name: following ? t('button.unfollow') : t('button.follow'),
           Icon: CheckRounded,
           onChoose: () =>
-            following ? setUnfollowing(coreAddress) : setFollowing(coreAddress),
+            (following ? setUnfollowing : setFollowing)({
+              chainId,
+              coreAddress,
+            }),
           loading: updatingFollowing,
         },
-        ...accounts.map(({ chainId, address }) => ({
+        ...accounts.map(({ chainId, address, type }, accountIndex) => ({
           name:
-            copied === chainId
-              ? t('info.copiedDaoChainAddress', {
-                  chain: getDisplayNameForChainId(chainId),
+            copied === accountIndex
+              ? t('info.copiedChainAddress', {
+                  chain:
+                    getDisplayNameForChainId(chainId) +
+                    (type === AccountType.Valence ? ' (Valence)' : ''),
                 })
-              : t('button.copyDaoChainAddress', {
-                  chain: getDisplayNameForChainId(chainId),
+              : t('button.copyChainAddress', {
+                  chain:
+                    getDisplayNameForChainId(chainId) +
+                    (type === AccountType.Valence ? ' (Valence)' : ''),
                 }),
-          Icon: copied === chainId ? Check : CopyAll,
+          Icon: copied === accountIndex ? Check : CopyAll,
           onChoose: () => {
             navigator.clipboard.writeText(address)
-            setCopied(chainId)
+            setCopied(accountIndex)
           },
         })),
       ],
@@ -195,11 +214,13 @@ export const makeGenericDaoContext: CommandModalContextMaker<{
             ({
               chainId,
               coreAddress,
+              coreVersion,
               name,
               imageUrl,
             }): CommandModalDaoInfo => ({
               chainId,
               coreAddress,
+              coreVersion,
               name,
               imageUrl: imageUrl || getFallbackImage(coreAddress),
             })
@@ -212,9 +233,9 @@ export const makeGenericDaoContext: CommandModalContextMaker<{
   }
 
   const Wrapper: CommandModalContextWrapper = ({ children }) => (
-    <DaoProvidersWithoutInfo chainId={chainId} coreAddress={coreAddress}>
+    <DaoProviders chainId={chainId} coreAddress={coreAddress}>
       {children}
-    </DaoProvidersWithoutInfo>
+    </DaoProviders>
   )
 
   return {

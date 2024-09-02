@@ -14,6 +14,7 @@ import {
 
 import { Account } from './account'
 import { SupportedChainConfig, WithChainId } from './chain'
+import { SecretModuleInstantiateInfo } from './clients'
 import {
   DaoCardProps,
   DaoDropdownInfo,
@@ -22,13 +23,15 @@ import {
 } from './components'
 import {
   ActiveThreshold,
+  ContractVersionInfo,
   DepositRefundPolicy,
   ModuleInstantiateInfo,
 } from './contracts/common'
 import {
-  InstantiateMsg as DaoCoreV2InstantiateMsg,
+  InstantiateMsg as DaoDaoCoreInstantiateMsg,
   ProposalModuleWithInfo,
-} from './contracts/DaoCore.v2'
+} from './contracts/DaoDaoCore'
+import { PreProposeSubmissionPolicy } from './contracts/DaoPreProposeSingle'
 import { ProposalResponse as MultipleChoiceProposalResponse } from './contracts/DaoProposalMultiple'
 import {
   ProposalResponse as SingleChoiceProposalResponse,
@@ -36,8 +39,10 @@ import {
 } from './contracts/DaoProposalSingle.v2'
 import { Config as NeutronCwdSubdaoTimelockSingleConfig } from './contracts/NeutronCwdSubdaoTimelockSingle'
 import { VotingVault } from './contracts/NeutronVotingRegistry'
+import { InstantiateMsg as SecretDaoDaoCoreInstantiateMsg } from './contracts/SecretDaoDaoCore'
 import { DaoCreator } from './creators'
 import { ContractVersion, SupportedFeatureMap } from './features'
+import { LoadingDataWithError } from './misc'
 import { ProposalVetoConfig } from './proposal'
 import {
   PercentOrMajorityValue,
@@ -45,29 +50,40 @@ import {
 } from './proposal-module-adapter'
 import { GenericToken } from './token'
 import { DurationWithUnits } from './units'
+import { Widget } from './widgets'
 
-// Used in DaoInfoContext in @dao-dao/stateful/components/DaoPageWrapper
+/**
+ * An object that represents a DAO across the app.
+ *
+ * If `coreVersion` is `ContractVersion.Gov`, then this DAO refers to a chain's
+ * native x/gov module governance. The `coreAddress` should be set to the
+ * configured `name` of the chain in the config, which is used in the URL to
+ * link to this DAO's page.
+ */
 export type DaoInfo = {
   chainId: string
   coreAddress: string
   coreVersion: ContractVersion
   supportedFeatures: SupportedFeatureMap
   votingModuleAddress: string
-  votingModuleContractName: string
+  votingModuleInfo: ContractVersionInfo
   proposalModules: ProposalModule[]
+  /**
+   * Wasm contract-level admin that can migrate.
+   */
+  contractAdmin: string | null
+  admin: string
   name: string
   description: string
-  imageUrl: string | null
-  created: Date | undefined
+  imageUrl: string
+  created: number | null
   isActive: boolean
   activeThreshold: ActiveThreshold | null
   items: Record<string, string>
   // Map chain ID to polytone proxy address.
   polytoneProxies: PolytoneProxies
   accounts: Account[]
-
   parentDao: DaoParentInfo | null
-  admin: string
 }
 
 export type DaoParentInfo = {
@@ -75,20 +91,25 @@ export type DaoParentInfo = {
   coreAddress: string
   coreVersion: ContractVersion
   name: string
-  imageUrl?: string | null
-  parentDao?: DaoParentInfo | null
+  imageUrl: string
   admin: string
+  parentDao: DaoParentInfo | null
+  /**
+   * If this parent is on a different chain from the SubDAO it's attached to,
+   * this is the polytone proxy that is actually the admin of the SubDAO, on the
+   * SubDAO's chain.
+   */
+  polytoneProxy: string | null
 
-  // Whether or not this parent has registered its child as a SubDAO.
+  /**
+   * Whether or not this parent has registered its child as a SubDAO.
+   */
   registeredSubDao: boolean
 }
 
-// Used in @dao-dao/stateful/components/DaoPageWrapper to serialize DaoInfo
-// loaded via static props (@dao-dao/stateful/server/makeGetDaoStaticProps) to
-// be fed into DaoPageWrapper and available in the UI via DaoInfoContext.
-export interface DaoInfoSerializable extends Omit<DaoInfo, 'created'> {
-  // Created needs to be serialized and de-serialized.
-  created: string | null
+export type DaoSource = {
+  chainId: string
+  coreAddress: string
 }
 
 export enum PreProposeModuleType {
@@ -153,6 +174,7 @@ export type PreProposeModule = {
   contractName: string
   version: ContractVersion
   address: string
+  submissionPolicy: PreProposeSubmissionPolicy
 } & PreProposeModuleTypedConfig
 
 export enum ProposalModuleType {
@@ -182,21 +204,21 @@ export type ProposalModuleTypedConfig =
 
 export type ProposalModule = {
   contractName: string
-  version: ContractVersion | null
+  version: ContractVersion
   address: string
   prefix: string
   // If set, this uses a pre-propose module.
   prePropose: PreProposeModule | null
 } & ProposalModuleTypedConfig
 
-export interface ProposalPrefill<FormData> {
+export type ProposalPrefill<FormData> = {
   // Proposal module adapter ID
   id: string
   // Proposal module adapter proposal creation form data
   data: FormData
 }
 
-export interface ProposalDraft<FormData = any> {
+export type ProposalDraft<FormData = any> = {
   name: string
   createdAt: number
   lastUpdatedAt: number
@@ -209,12 +231,17 @@ export type CreateDaoCustomValidator = (setNewErrors: boolean) => void
 
 export interface CreateDaoContext<CreatorData extends FieldValues = any> {
   form: UseFormReturn<NewDao<CreatorData>>
-  instantiateMsg: DaoCoreV2InstantiateMsg | undefined
+  instantiateMsg:
+    | DaoDaoCoreInstantiateMsg
+    | SecretDaoDaoCoreInstantiateMsg
+    | undefined
   instantiateMsgError: string | undefined
   commonVotingConfig: DaoCreationCommonVotingConfigItems
   availableCreators: readonly DaoCreator[]
   creator: DaoCreator
   proposalModuleDaoCreationAdapters: Required<ProposalModuleAdapter>['daoCreation'][]
+  availableWidgets: readonly Widget[]
+  predictedDaoAddress: LoadingDataWithError<string>
   setCustomValidator: (fn: CreateDaoCustomValidator) => void
   makeDefaultNewDao: (chainId: string) => NewDao
   SuspenseLoader: ComponentType<SuspenseLoaderProps>
@@ -225,6 +252,7 @@ export interface NewDao<
   CreatorData extends FieldValues = any,
   VotingConfig = any
 > {
+  uuid: string
   chainId: string
   name: string
   description: string
@@ -239,6 +267,22 @@ export interface NewDao<
   }[]
   votingConfig: DaoCreationVotingConfig & VotingConfig
   advancedVotingConfigEnabled: boolean
+  /**
+   * Map widget ID to values for that widget. If null, it was added and then
+   * deleted. Make optional for backwards compatibility with saved forms in
+   * people's browsers.
+   */
+  widgets?: Record<string, Record<string, any> | null>
+  /**
+   * The DAO address that will be created based on the uuid when using
+   * instantiate2. This is used when setting up extensions that need to know the
+   * DAO address. When the factory that creates DAOs changes, the instantiate2
+   * address changes. This field is used to reset the extensions when the
+   * predicted address changes due to a factory change. This will likely never
+   * happen as the factories never need to change, and will only be an edge case
+   * due to cached data.
+   */
+  predictedDaoAddress?: string
 }
 
 export interface NewDaoTier {
@@ -328,7 +372,7 @@ export type DaoCreationGetInstantiateInfo<
   newDao: NewDao<any, ModuleData>,
   data: DaoCreationVotingConfig & ModuleData,
   t: TFunction
-) => ModuleInstantiateInfo
+) => ModuleInstantiateInfo | SecretModuleInstantiateInfo
 
 export type DaoCreatedCardProps = Omit<
   DaoCardProps,
@@ -387,6 +431,10 @@ export type DaoCreationVotingConfigWithVeto = {
   veto: ProposalVetoConfig
 }
 
+export type DaoCreationVotingConfigWithProposalExecutionPolicy = {
+  onlyMembersExecute: boolean
+}
+
 export type DaoCreationVotingConfig = DaoCreationVotingConfigWithAllowRevoting &
   DaoCreationVotingConfigWithProposalDeposit &
   DaoCreationVotingConfigWithProposalSubmissionPolicy &
@@ -394,7 +442,8 @@ export type DaoCreationVotingConfig = DaoCreationVotingConfigWithAllowRevoting &
   DaoCreationVotingConfigWithVotingDuration &
   DaoCreationVotingConfigWithEnableMultipleChoice &
   DaoCreationVotingConfigWithApprover &
-  DaoCreationVotingConfigWithVeto
+  DaoCreationVotingConfigWithVeto &
+  DaoCreationVotingConfigWithProposalExecutionPolicy
 
 //! Other
 
@@ -488,7 +537,6 @@ export type IndexerDaoWithVetoableProposals = {
 export type DaoWithVetoableProposals = WithChainId<
   IndexerDaoWithVetoableProposals & {
     name: string
-    proposalModules: ProposalModule[]
   }
 >
 
@@ -521,4 +569,5 @@ export type VotingVaultInfo =
 
 export type VotingVaultWithInfo = VotingVault & {
   info: VotingVaultInfo
+  totalPower: string
 }

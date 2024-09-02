@@ -3,13 +3,11 @@ import clsx from 'clsx'
 import { ComponentType, Fragment, ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { ProposalVoterProps } from '@dao-dao/types'
-
 import { Button } from '../buttons'
-import { InfoCard } from '../InfoCard'
+import { StatusCard } from '../StatusCard'
 import { ProposalVoteButton } from './ProposalVoteButton'
 
-export type ProposalStatusAndInfoProps<Vote extends unknown = unknown> = {
+export type ProposalStatusAndInfoProps = {
   status?: string
   info: {
     Icon: ComponentType<{ className: string }>
@@ -42,10 +40,10 @@ export type ProposalStatusAndInfoProps<Vote extends unknown = unknown> = {
   /**
    * Voter component. Only shown on desktop. Should only be defined if can vote.
    */
-  Voter?: ComponentType<Pick<ProposalVoterProps<Vote>, 'className'>>
+  Voter?: ComponentType<{ className: string }>
 }
 
-export const ProposalStatusAndInfo = <Vote extends unknown = unknown>({
+export const ProposalStatusAndInfo = ({
   status,
   info,
   inline = false,
@@ -54,7 +52,7 @@ export const ProposalStatusAndInfo = <Vote extends unknown = unknown>({
   footer,
   className,
   Voter,
-}: ProposalStatusAndInfoProps<Vote>) => {
+}: ProposalStatusAndInfoProps) => {
   const { t } = useTranslation()
 
   return (
@@ -97,7 +95,7 @@ export const ProposalStatusAndInfo = <Vote extends unknown = unknown>({
 
             <p className="secondary-text w-full">{label}</p>
 
-            <Value className="max-w-full pl-3 !font-mono !text-sm !font-medium !leading-5 !text-text-body" />
+            <Value className="max-w-full !pl-3 !font-mono !text-sm !font-medium !leading-5 !text-text-body" />
           </Fragment>
         ))}
       </div>
@@ -124,7 +122,9 @@ export const ProposalStatusAndInfo = <Vote extends unknown = unknown>({
             </Button>
           )}
 
-          {action.description && <InfoCard content={action.description} />}
+          {action.description && (
+            <StatusCard content={action.description} size="xs" style="info" />
+          )}
         </div>
       )}
 
@@ -147,17 +147,23 @@ export const ProposalStatusAndInfo = <Vote extends unknown = unknown>({
           <div className="flex flex-col gap-1">
             {!vetoOrEarlyExecute.isNeutronOverrule &&
               vetoOrEarlyExecute.isVetoerDaoMember && (
-                <InfoCard
+                <StatusCard
                   content={t('info.vetoActionDaoMemberExplanation', {
                     context: vetoOrEarlyExecute.onEarlyExecute
                       ? 'withEarlyExecute'
                       : 'withoutEarlyExecute',
                   })}
+                  size="xs"
+                  style="info"
                 />
               )}
 
             {vetoOrEarlyExecute.onEarlyExecute && (
-              <InfoCard content={t('info.vetoEarlyExecuteExplanation')} />
+              <StatusCard
+                content={t('info.vetoEarlyExecuteExplanation')}
+                size="xs"
+                style="info"
+              />
             )}
           </div>
 

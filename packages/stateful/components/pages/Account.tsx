@@ -1,11 +1,12 @@
 import { fromBech32 } from '@cosmjs/encoding'
+import { useQueryClient } from '@tanstack/react-query'
 import { NextPage } from 'next'
 import { NextSeo } from 'next-seo'
 import { useRouter } from 'next/router'
 import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useRecoilValue } from 'recoil'
 
+import { profileQueries } from '@dao-dao/state/query'
 import {
   averageColorSelector,
   walletHexPublicKeySelector,
@@ -24,14 +25,16 @@ import {
   SITE_URL,
   getConfiguredChains,
   isValidBech32Address,
+  makeEmptyUnifiedProfile,
   transformBech32Address,
 } from '@dao-dao/utils'
 
-import { walletProfileDataSelector } from '../../recoil'
+import { useQueryLoadingData } from '../../hooks'
 import { ButtonLink } from '../ButtonLink'
 import { PageHeaderContent } from '../PageHeaderContent'
 import { SuspenseLoader } from '../SuspenseLoader'
 import { AccountDaos } from './AccountDaos'
+import { AccountWallet } from './AccountWallet'
 
 export const Account: NextPage = () => {
   const { t } = useTranslation()
@@ -53,6 +56,8 @@ export const Account: NextPage = () => {
   const configuredChain =
     getConfiguredChains().find(({ chain }) => chain.bech32_prefix === prefix) ||
     getConfiguredChains()[0]
+  // Transform just in case there was no chain found and we defaulted to the
+  // first configured chain.
   const accountAddress = transformBech32Address(
     address as string,
     configuredChain.chainId
@@ -60,24 +65,23 @@ export const Account: NextPage = () => {
 
   const hexPublicKey = useCachedLoadingWithError(
     walletHexPublicKeySelector({
-      chainId: configuredChain.chain.chain_id,
+      chainId: configuredChain.chainId,
       walletAddress: accountAddress,
     })
   )
 
-  const profileData = useRecoilValue(
-    walletProfileDataSelector({
-      chainId: configuredChain.chain.chain_id,
+  const profile = useQueryLoadingData(
+    profileQueries.unified(useQueryClient(), {
+      chainId: configuredChain.chainId,
       address: accountAddress,
-    })
+    }),
+    makeEmptyUnifiedProfile(configuredChain.chainId, accountAddress)
   )
 
   const { setAccentColor, theme } = useThemeContext()
   // Get average color of image URL.
   const averageImgColorLoadable = useCachedLoadable(
-    profileData.loading
-      ? undefined
-      : averageColorSelector(profileData.profile.imageUrl)
+    profile.loading ? undefined : averageColorSelector(profile.data.imageUrl)
   )
 
   // Set theme's accentColor.
@@ -136,11 +140,12 @@ export const Account: NextPage = () => {
       <ChainProvider chainId={configuredChain.chainId}>
         <StatelessAccount
           AccountDaos={AccountDaos}
+          AccountWallet={AccountWallet}
           ButtonLink={ButtonLink}
           SuspenseLoader={SuspenseLoader}
           address={accountAddress}
           hexPublicKey={hexPublicKey}
-          profileData={profileData}
+          profile={profile}
         />
       </ChainProvider>
     </>

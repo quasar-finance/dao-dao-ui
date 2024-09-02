@@ -1,5 +1,4 @@
 import JSON5 from 'json5'
-import { TFunction } from 'react-i18next'
 
 import {
   isValidBech32Address,
@@ -7,8 +6,10 @@ import {
   isValidValidatorAddress,
 } from '../address'
 import { isValidNativeTokenDenom } from '../assets'
-import cosmosMsgSchema from '../cosmos_msg.json'
+import { isSecretNetwork } from '../chain'
 import { isValidUrl } from '../isValidUrl'
+import cosmosMsgSchema from './cosmos_msg.json'
+import secretCosmosMsgSchema from './cosmos_msg.secret.json'
 import { makeValidateMsg } from './makeValidateMsg'
 
 export * from './makeValidateMsg'
@@ -32,7 +33,7 @@ export const validatePercent = (v: string | number | undefined) => {
 }
 
 export const makeValidateAddress =
-  (bech32Prefix: string, required = true) =>
+  (bech32Prefix?: string, required = true) =>
   (v: any) =>
     (!required && !v) ||
     (v && typeof v === 'string' && isValidBech32Address(v, bech32Prefix)) ||
@@ -48,13 +49,6 @@ export const validateUrl = (v: string | undefined) =>
 export const validateUrlWithIpfs = (v: string | undefined) =>
   (v && isValidUrl(v, true)) ||
   'Invalid image URL: must start with https or ipfs.'
-
-export const makeValidateDate =
-  (t: TFunction, time = false, required = true) =>
-  (v: string | undefined) =>
-    (!required && !v) ||
-    (v && !isNaN(Date.parse(v))) ||
-    t(time ? 'error.invalidDateTime' : 'error.invalidDate')
 
 export const makeValidateTokenFactoryDenom =
   (bech32Prefix: string, required = true) =>
@@ -77,6 +71,15 @@ export const validateJSON = (v: string) => {
 }
 
 export const validateCosmosMsg = makeValidateMsg(cosmosMsgSchema)
+export const validateSecretCosmosMsg = makeValidateMsg(secretCosmosMsgSchema)
+
+export const validateCosmosMsgForChain = (
+  chainId: string,
+  obj: Record<string, any>
+) =>
+  isSecretNetwork(chainId)
+    ? validateSecretCosmosMsg(obj)
+    : validateCosmosMsg(obj)
 
 export const validateTokenSymbol = (v: string) =>
   /^[a-zA-Z\-]{3,12}$/.test(v) ||

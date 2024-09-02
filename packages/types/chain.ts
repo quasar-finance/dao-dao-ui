@@ -56,7 +56,8 @@ export interface NativeDelegationInfo {
 
 export enum ChainId {
   CosmosHubMainnet = 'cosmoshub-4',
-  CosmosHubTestnet = 'theta-testnet-001',
+  CosmosHubThetaTestnet = 'theta-testnet-001',
+  CosmosHubProviderTestnet = 'provider',
   JunoMainnet = 'juno-1',
   JunoTestnet = 'uni-6',
   OsmosisMainnet = 'osmosis-1',
@@ -64,13 +65,25 @@ export enum ChainId {
   StargazeMainnet = 'stargaze-1',
   StargazeTestnet = 'elgafar-1',
   NeutronMainnet = 'neutron-1',
+  NeutronTestnet = 'pion-1',
   TerraMainnet = 'phoenix-1',
+  TerraClassicMainnet = 'columbus-5',
   MigalooMainnet = 'migaloo-1',
   MigalooTestnet = 'narwhal-2',
   NobleMainnet = 'noble-1',
   KujiraMainnet = 'kaiyo-1',
+  KujiraTestnet = 'harpoon-4',
   ChihuahuaMainnet = 'chihuahua-1',
   OraichainMainnet = 'Oraichain',
+  ArchwayMainnet = 'archway-1',
+  InjectiveMainnet = 'injective-1',
+  BitsongMainnet = 'bitsong-2b',
+  BitsongTestnet = 'bobnet',
+  OmniflixHubMainnet = 'omniflixhub-1',
+  OmniflixHubTestnet = 'flixnet-4',
+  SecretMainnet = 'secret-4',
+  SecretTestnet = 'pulsar-3',
+  QuasarTestnet = 'quasar-test-1',
 }
 
 export type BaseChainConfig = {
@@ -138,18 +151,71 @@ export type SupportedChainConfig = BaseChainConfig & {
     network: string
   }
   /**
+   * Map DAO creator ID to whether or not it's disabled and for what reason. If
+   * not present, enabled.
+   */
+  daoCreatorDisabled?: Partial<
+    Record<string, 'underDevelopment' | 'unsupported'>
+  >
+  /**
+   * Version of the code IDs in the config below.
+   */
+  codeIdsVersion: ContractVersion
+  /**
    * Code IDs stored on this chain that are used throughout the UI.
    */
   codeIds: CodeIdConfig
+  /**
+   * Code hashes for IDs above. Only used by Secret Network.
+   */
+  codeHashes?: CodeHashConfig
   /**
    * Whether or not to create DAOs with CW20s. The alternative is to use token
    * factory native tokens. Defaults to false.
    */
   createWithCw20?: boolean
   /**
+   * Disallow creating new tokens for token-based DAOs and show a tooltip that
+   * token creation is under development. Defaults to false.
+   */
+  tokenCreationUnderDevelopment?: boolean
+  /**
+   * Disallow creating new tokens for token-based DAOs and show a tooltip that
+   * token creation is disabled due to the lack of token factory. Defaults to
+   * false.
+   */
+  noTokenFactory?: boolean
+  /**
+   * Token creation factory address to use during DAO creation.
+   */
+  tokenCreationFactoryAddress?: string
+  /**
+   * Whether or not to create a DAO through chain governance.
+   */
+  createViaGovernance?: boolean
+  /**
+   * Whether or not this chain supports instantiate2 for creating DAOs with
+   * extensions setup.
+   */
+  noInstantiate2Create?: boolean
+  /**
    * Whether or not this chain has an indexer.
    */
   noIndexer?: boolean
+  /**
+   * If this chain uses a DAO as its chain governance instead of x/gov, set this
+   * to the DAO's address.
+   */
+  govContractAddress?: string
+  /**
+   * SubDAOs to display with this chain's native governance.
+   *
+   * These should be legitimate SubDAOs with the chain governance module set as
+   * their admin. This is necessray because chains cannot recognize SubDAOs as
+   * they are not DAO contracts, and we need to establish which SubDAOs of a DAO
+   * are legitimate for safety.
+   */
+  subDaos?: string[]
   /**
    * Past versions of contracts, in case DAOs need a particular version of a
    * contract.
@@ -159,6 +225,19 @@ export type SupportedChainConfig = BaseChainConfig & {
    * Polytone connections to other chains from this chain.
    */
   polytone?: PolytoneConfig
+  /**
+   * Timewave's Valence config.
+   */
+  valence?: {
+    /**
+     * Address of services manager contract.
+     */
+    servicesManager: string
+    /**
+     * Address of rebalancer contract.
+     */
+    rebalancer: string
+  }
 }
 
 export type SupportedChain = SupportedChainConfig & {
@@ -175,7 +254,7 @@ export type CodeIdConfig = {
   // https://github.com/DA0-DA0/dao-contracts
   CwPayrollFactory: number
   CwTokenSwap: number
-  CwTokenfactoryIssuer: number
+  CwTokenfactoryIssuerMain: number
   CwVesting: number
   DaoCore: number
   DaoMigrator: number
@@ -185,14 +264,31 @@ export type CodeIdConfig = {
   DaoPreProposeSingle: number
   DaoProposalMultiple: number
   DaoProposalSingle: number
+  DaoRewardsDistributor?: number
   DaoVotingCw4: number
   DaoVotingCw721Staked: number
   DaoVotingTokenStaked: number
+
+  // For Secret Network
+  QueryAuth?: number
+
+  // For OmniFlix
+  DaoVotingOnftStaked?: number
+
+  // For migrating Migaloo DAOs from cosmwasm to osmosis x/tokenfactory.
+  CwTokenfactoryIssuerCosmWasm?: number
 
   // For migrating v1 to v2 DAOs, and some chains use CW20s.
   Cw20Base?: number
   Cw20Stake?: number
   DaoVotingCw20Staked?: number
+
+  // Valence
+  ValenceAccount?: number
+}
+
+export type CodeHashConfig = {
+  [K in keyof CodeIdConfig]: string
 }
 
 export type PolytoneConnection = {
@@ -237,3 +333,19 @@ export type CreateCw1Whitelist = (
   admins: string[],
   mutable?: boolean
 ) => Promise<string | undefined>
+
+export type ValidatorSlash = {
+  registeredBlockHeight: string
+  registeredBlockTimeUnixMs: string
+  infractionBlockHeight: string
+  // Slash fraction applied to validator's undelegating and redelegating tokens.
+  slashFactor: string
+  amountSlashed: string
+  // Slash fraction applied to validator's current delegations. It may be less
+  // than `slashFactor`.
+  effectiveFraction: string
+  // Amount of tokens slashed from delegations. This should be `amountSlashed`
+  // minus the amount slashed from the validator's undelegating and redelegating
+  // tokens.
+  stakedTokensBurned: string
+}

@@ -28,11 +28,11 @@ import {
   ActionComponentProps,
   ActionContextType,
 } from '@dao-dao/types/actions'
-import { formatPercentOf100, validateRequired } from '@dao-dao/utils'
 import {
   VoteOption,
   WeightedVoteOption,
-} from '@dao-dao/utils/protobuf/codegen/cosmos/gov/v1beta1/gov'
+} from '@dao-dao/types/protobuf/codegen/cosmos/gov/v1beta1/gov'
+import { formatPercentOf100, validateRequired } from '@dao-dao/utils'
 
 import { useActionOptions } from '../../../react'
 
@@ -172,7 +172,7 @@ const VoteFooter = ({
           {t('info.subjectsVote', {
             subject:
               context.type === ActionContextType.Dao
-                ? context.info.name
+                ? context.dao.name
                 : t('info.your'),
           })}
         </p>
@@ -211,7 +211,7 @@ const VoteFooter = ({
                 {t('info.subjectsCurrentlyCastVote', {
                   subject:
                     context.type === ActionContextType.Dao
-                      ? context.info.name
+                      ? context.dao.name
                       : t('info.your'),
                 })}
               </p>
@@ -220,7 +220,7 @@ const VoteFooter = ({
                 title={t('info.subjectsCurrentlyCastVoteTooltip', {
                   subject:
                     context.type === ActionContextType.Dao
-                      ? context.info.name
+                      ? context.dao.name
                       : t('info.you'),
                 })}
               />

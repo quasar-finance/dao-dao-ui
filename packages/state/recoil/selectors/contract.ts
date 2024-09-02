@@ -1,4 +1,4 @@
-import { CodeDetails } from '@cosmjs/cosmwasm-stargate'
+import { CodeDetails, Contract } from '@cosmjs/cosmwasm-stargate'
 import { fromUtf8, toUtf8 } from '@cosmjs/encoding'
 import { selectorFamily } from 'recoil'
 
@@ -8,6 +8,7 @@ import {
   DAO_CORE_CONTRACT_NAMES,
   INVALID_CONTRACT_ERROR_SUBSTRINGS,
   getChainForChainId,
+  isSecretNetwork,
   isValidBech32Address,
   parseContractVersion,
 } from '@dao-dao/utils'
@@ -31,6 +32,8 @@ export const contractInstantiateTimeSelector = selectorFamily<
           contractAddress: address,
           chainId,
           formula: 'instantiatedAt',
+          // This never changes, so query even if the indexer is behind.
+          noFallback: true,
         })
       )
       // Null when indexer fails.
@@ -58,23 +61,28 @@ export const contractInstantiateTimeSelector = selectorFamily<
     },
 })
 
+export const contractDetailsSelector = selectorFamily<
+  Contract,
+  WithChainId<{ contractAddress: string }>
+>({
+  key: 'contractDetails',
+  get:
+    ({ contractAddress, chainId }) =>
+    async ({ get }) => {
+      const client = get(cosmWasmClientForChainSelector(chainId))
+      return await client.getContract(contractAddress)
+    },
+})
+
 export const contractAdminSelector = selectorFamily<
   string | undefined,
   WithChainId<{ contractAddress: string }>
 >({
   key: 'contractAdmin',
   get:
-    ({ contractAddress, chainId }) =>
-    async ({ get }) => {
-      const client = get(cosmWasmClientForChainSelector(chainId))
-
-      try {
-        const contract = await client.getContract(contractAddress)
-        return contract.admin
-      } catch (_) {
-        return undefined
-      }
-    },
+    (params) =>
+    ({ get }) =>
+      get(contractDetailsSelector(params))?.admin,
 })
 
 export const codeDetailsSelector = selectorFamily<
@@ -137,15 +145,24 @@ export const contractInfoSelector = selectorFamily<
 
       // If indexer fails, fallback to querying chain.
       const client = get(cosmWasmClientForChainSelector(chainId))
-      const contractInfo = await client.queryContractRaw(
-        contractAddress,
-        toUtf8('contract_info')
-      )
-      if (contractInfo) {
-        const info: InfoResponse = {
-          info: JSON.parse(fromUtf8(contractInfo)),
+
+      if (isSecretNetwork(chainId)) {
+        // Secret Network does not allow accessing raw state directly, so this
+        // will only work if the contract has an `info` query, which all our DAO
+        // contracts do, but not all DAO contracts do.
+        return await client.queryContractSmart(contractAddress, {
+          info: {},
+        })
+      } else {
+        const { data: contractInfo } = await client[
+          'forceGetQueryClient'
+        ]().wasm.queryContractRaw(contractAddress, toUtf8('contract_info'))
+        if (contractInfo) {
+          const info: InfoResponse = {
+            info: JSON.parse(fromUtf8(contractInfo)),
+          }
+          return info
         }
-        return info
       }
 
       throw new Error(
@@ -234,6 +251,23 @@ export const isPolytoneProxySelector = selectorFamily<
           contractAddress: address,
           chainId,
           name: ContractName.PolytoneProxy,
+        })
+      ),
+})
+
+export const isValenceAccountSelector = selectorFamily<
+  boolean,
+  WithChainId<{ address: string }>
+>({
+  key: 'isValenceAccount',
+  get:
+    ({ address, chainId }) =>
+    ({ get }) =>
+      get(
+        isContractSelector({
+          contractAddress: address,
+          chainId,
+          name: 'valence-account',
         })
       ),
 })

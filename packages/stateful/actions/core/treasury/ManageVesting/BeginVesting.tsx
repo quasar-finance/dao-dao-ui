@@ -15,19 +15,20 @@ import {
   Button,
   ChainProvider,
   CopyToClipboard,
+  DateTimePicker,
+  DateTimePickerNoForm,
   IconButton,
   InputErrorMessage,
   InputLabel,
-  InputThemedText,
   NumberInput,
   RadioInput,
   RadioInputOption,
   SelectInput,
+  StatusCard,
   TextAreaInput,
   TextInput,
   TokenInput,
   VestingStepsLineGraph,
-  WarningCard,
 } from '@dao-dao/stateless'
 import {
   ActionChainContextType,
@@ -55,7 +56,6 @@ import {
   getDisplayNameForChainId,
   getSupportedChainConfig,
   makeValidateAddress,
-  makeValidateDate,
   validateNonNegative,
   validatePositive,
   validateRequired,
@@ -92,9 +92,9 @@ export type BeginVestingOptions = {
   // If undefined, no widget is setup, and begin vesting should be disabled.
   widgetData: VestingPaymentsWidgetData | undefined
   tokens: GenericTokenBalanceWithOwner[]
-  // The vesting contract factory owner. If undefined, no owner is set. This is
+  // The vesting contract factory owner. If null, no owner is set. This is
   // only used for pre-v1 vesting widgets.
-  preV1VestingFactoryOwner: LoadingDataWithError<string | undefined>
+  preV1VestingFactoryOwner: LoadingDataWithError<string | null>
   AddressInput: ComponentType<AddressInputProps<BeginVestingData>>
   EntityDisplay: ComponentType<StatefulEntityDisplayProps>
   createCw1WhitelistOwners: CreateCw1Whitelist
@@ -227,9 +227,8 @@ export const BeginVesting: ActionComponent<BeginVestingOptions> = ({
     }
   }, [clearErrors, fieldNamePrefix, isCreating, setError, t, totalStepPercent])
 
-  const formattedStartDate = startDate && formatDateTimeTz(startDate)
-  const formattedFinishDate = stepPoints?.length
-    ? formatDateTimeTz(new Date(stepPoints[stepPoints.length - 1].timestamp))
+  const finishDate = stepPoints?.length
+    ? new Date(stepPoints[stepPoints.length - 1].timestamp)
     : undefined
 
   const selectedToken = tokens.find(
@@ -263,10 +262,17 @@ export const BeginVesting: ActionComponent<BeginVestingOptions> = ({
     actionOptions,
     chainId
   )
+
   const vestingManagerExists =
     !!widgetData.factories?.[chainId] ||
     // Old single-chain factory support.
     (chainId === nativeChainId && !!widgetData.factory)
+  const vestingManagerVersion = widgetData.factories
+    ? widgetData.factories[chainId]?.version
+    : // Old single-chain factory support.
+    chainId === nativeChainId && !!widgetData.factory
+    ? widgetData.version
+    : undefined
 
   const crossChainAccountActionExists = allActionsWithData.some(
     (action) => action.actionKey === ActionKey.ConfigureVestingPayments
@@ -288,11 +294,12 @@ export const BeginVesting: ActionComponent<BeginVestingOptions> = ({
         {isCreating &&
           !vestingManagerExists &&
           configureVestingPaymentActionDefaults && (
-            <WarningCard
+            <StatusCard
               className="max-w-lg"
               content={t('info.vestingManagerNeeded', {
                 chain: getDisplayNameForChainId(chainId),
               })}
+              style="warning"
             >
               <Button
                 disabled={crossChainAccountActionExists}
@@ -312,7 +319,7 @@ export const BeginVesting: ActionComponent<BeginVestingOptions> = ({
                   ? t('button.vestingManagerSetupActionAdded')
                   : t('button.addVestingManagerSetupAction')}
               </Button>
-            </WarningCard>
+            </StatusCard>
           )}
 
         <div className="space-y-2">
@@ -429,8 +436,8 @@ export const BeginVesting: ActionComponent<BeginVestingOptions> = ({
 
         {
           // V1 and later can set the owner.
-          !!widgetData.version &&
-            widgetData.version >= VestingContractVersion.V1 && (
+          !!vestingManagerVersion &&
+            vestingManagerVersion >= VestingContractVersion.V1 && (
               <div className="flex flex-col gap-4 rounded-md bg-background-tertiary p-4">
                 <InputLabel name={t('form.whoCanCancelPayment')} />
 
@@ -554,39 +561,25 @@ export const BeginVesting: ActionComponent<BeginVestingOptions> = ({
         <div className="flex flex-row flex-wrap gap-2">
           {/* Start Date */}
           <div className="flex max-w-xs flex-col gap-2">
-            <div className="flex flex-row items-end gap-2">
-              <InputLabel name={t('form.startDate')} />
+            <InputLabel name={t('form.startDate')} />
 
-              {/* Date Preview */}
-              {formattedStartDate && isCreating && (
-                <p className="caption-text">{formattedStartDate}</p>
-              )}
+            <div className="flex flex-col gap-1">
+              <DateTimePicker
+                control={control}
+                disabled={!isCreating}
+                error={errors?.startDate}
+                fieldName={(fieldNamePrefix + 'startDate') as 'startDate'}
+                required
+              />
+              <InputErrorMessage error={errors?.startDate} />
             </div>
-
-            {isCreating ? (
-              <div className="flex flex-col gap-1">
-                <TextInput
-                  error={errors?.startDate}
-                  fieldName={(fieldNamePrefix + 'startDate') as 'startDate'}
-                  // eslint-disable-next-line i18next/no-literal-string
-                  placeholder="YYYY-MM-DD HH:mm"
-                  register={register}
-                  validation={[validateRequired, makeValidateDate(t, true)]}
-                />
-                <InputErrorMessage error={errors?.startDate} />
-              </div>
-            ) : (
-              <InputThemedText>{formattedStartDate}</InputThemedText>
-            )}
           </div>
 
           {/* Finish Date, once created */}
-          {!isCreating && formattedFinishDate && (
+          {!isCreating && finishDate && (
             <div className="flex max-w-xs flex-col gap-2">
               <InputLabel name={t('form.finishDate')} />
-              <InputThemedText className="max-w-xs">
-                {formattedFinishDate}
-              </InputThemedText>
+              <DateTimePickerNoForm disabled value={finishDate} />
             </div>
           )}
         </div>

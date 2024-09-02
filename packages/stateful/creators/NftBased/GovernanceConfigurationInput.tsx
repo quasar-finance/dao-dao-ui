@@ -1,21 +1,27 @@
+import { useQueries } from '@tanstack/react-query'
 import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { constSelector, useRecoilValueLoadable } from 'recoil'
 
-import { CommonNftSelectors } from '@dao-dao/state'
 import {
-  FormattedJsonDisplay,
+  contractQueries,
+  cw721BaseQueries,
+  omniflixQueries,
+} from '@dao-dao/state'
+import {
   InputErrorMessage,
+  Loader,
   TextInput,
   useChain,
 } from '@dao-dao/stateless'
-import { DaoCreationGovernanceConfigInputProps } from '@dao-dao/types'
+import { ChainId, DaoCreationGovernanceConfigInputProps } from '@dao-dao/types'
 import {
+  isSecretNetwork,
   isValidBech32Address,
   makeValidateAddress,
   validateRequired,
 } from '@dao-dao/utils'
 
+import { useQueryLoadingDataWithError } from '../../hooks'
 import { CreatorData, GovernanceTokenType } from './types'
 
 export const GovernanceConfigurationInput = ({
@@ -32,58 +38,94 @@ export const GovernanceConfigurationInput = ({
 }: DaoCreationGovernanceConfigInputProps<CreatorData>) => {
   const { t } = useTranslation()
   const { chain_id: chainId, bech32_prefix: bech32Prefix } = useChain()
+  const isOmniFlix =
+    chainId === ChainId.OmniflixHubMainnet ||
+    chainId === ChainId.OmniflixHubTestnet
 
   //! Validate existing governance token.
-  const existingGovernanceTokenDenomOrAddress =
+  const existingGovernanceNftCollectionAddress =
     data.tokenType === GovernanceTokenType.Existing
-      ? data.existingGovernanceTokenDenomOrAddress
+      ? data.existingGovernanceNftCollectionAddress
       : undefined
-  const existingGovernanceTokenInfoLoadable = useRecoilValueLoadable(
-    existingGovernanceTokenDenomOrAddress &&
-      isValidBech32Address(existingGovernanceTokenDenomOrAddress, bech32Prefix)
-      ? CommonNftSelectors.contractInfoSelector({
+  const existingAddressValid =
+    !!existingGovernanceNftCollectionAddress &&
+    (isOmniFlix ||
+      isValidBech32Address(
+        existingGovernanceNftCollectionAddress,
+        bech32Prefix
+      ))
+
+  const collectionInfoLoadable = useQueries({
+    queries: [
+      {
+        ...omniflixQueries.onftCollectionInfo({
           chainId,
-          contractAddress: existingGovernanceTokenDenomOrAddress,
-          params: [],
-        })
-      : constSelector(undefined)
-  )
-  const numOfTokensLoadable = useRecoilValueLoadable(
-    existingGovernanceTokenDenomOrAddress &&
-      isValidBech32Address(existingGovernanceTokenDenomOrAddress, bech32Prefix)
-      ? CommonNftSelectors.numTokensSelector({
+          id: existingGovernanceNftCollectionAddress || '',
+        }),
+        enabled: isOmniFlix && existingAddressValid,
+      },
+      {
+        ...cw721BaseQueries.contractInfo({
           chainId,
-          contractAddress: existingGovernanceTokenDenomOrAddress,
-          params: [],
+          contractAddress: existingGovernanceNftCollectionAddress || '',
+        }),
+        enabled: !isOmniFlix && existingAddressValid,
+      },
+    ],
+    combine: ([omniflixResult, cw721Result]) =>
+      isOmniFlix ? omniflixResult : cw721Result,
+  })
+
+  const secretCodeHash = useQueryLoadingDataWithError(
+    existingAddressValid && isSecretNetwork(chainId)
+      ? contractQueries.secretCodeHash({
+          chainId,
+          address: existingGovernanceNftCollectionAddress,
         })
-      : constSelector(undefined)
+      : undefined
   )
 
   useEffect(() => {
+    if (isSecretNetwork(chainId)) {
+      setValue(
+        'creator.data.secretCodeHash',
+        secretCodeHash.loading ||
+          secretCodeHash.updating ||
+          secretCodeHash.errored
+          ? undefined
+          : secretCodeHash.data
+      )
+    }
+
     setValue(
-      'creator.data.existingGovernanceTokenInfo',
-      existingGovernanceTokenInfoLoadable.state === 'hasValue'
-        ? existingGovernanceTokenInfoLoadable.contents
-        : undefined
+      'creator.data.existingCollectionInfo',
+      !collectionInfoLoadable.isFetched || collectionInfoLoadable.isFetching
+        ? undefined
+        : collectionInfoLoadable.data
     )
 
-    if (existingGovernanceTokenInfoLoadable.state !== 'hasError') {
-      if (errors?.creator?.data?.existingGovernanceTokenInfo) {
-        clearErrors('creator.data.existingGovernanceTokenInfo._error')
+    if (!collectionInfoLoadable.isError) {
+      if (errors?.creator?.data?.existingCollectionInfo) {
+        clearErrors('creator.data.existingCollectionInfo')
       }
       return
     }
 
-    if (!errors?.creator?.data?.existingGovernanceTokenInfo) {
-      setError('creator.data.existingGovernanceTokenInfo._error', {
+    if (!errors?.creator?.data?.existingCollectionInfo) {
+      setError('creator.data.existingCollectionInfo', {
         type: 'manual',
-        message: t('error.failedToGetTokenInfo', { tokenType: 'CW721' }),
+        message: t('error.failedToGetTokenInfo', {
+          tokenType: isOmniFlix ? 'ONFT' : 'CW721',
+        }),
       })
     }
   }, [
+    chainId,
     clearErrors,
-    errors?.creator?.data?.existingGovernanceTokenInfo,
-    existingGovernanceTokenInfoLoadable,
+    collectionInfoLoadable,
+    errors?.creator?.data?.existingCollectionInfo,
+    isOmniFlix,
+    secretCodeHash,
     setError,
     setValue,
     t,
@@ -103,29 +145,40 @@ export const GovernanceConfigurationInput = ({
             <TextInput
               className="symbol-small-body-text font-mono text-text-secondary"
               error={
-                errors.creator?.data?.existingGovernanceTokenDenomOrAddress
+                errors.creator?.data?.existingGovernanceNftCollectionAddress
               }
-              fieldName="creator.data.existingGovernanceTokenDenomOrAddress"
+              fieldName="creator.data.existingGovernanceNftCollectionAddress"
               ghost
-              placeholder={bech32Prefix + '...'}
+              placeholder={
+                (isOmniFlix
+                  ? // eslint-disable-next-line i18next/no-literal-string
+                    'onftdenom'
+                  : bech32Prefix) + '...'
+              }
               register={register}
-              validation={[validateRequired, makeValidateAddress(bech32Prefix)]}
+              validation={[
+                validateRequired,
+                ...(!isOmniFlix ? [makeValidateAddress(bech32Prefix)] : []),
+              ]}
             />
             <InputErrorMessage
               error={
-                errors.creator?.data?.existingGovernanceTokenDenomOrAddress ||
-                errors.creator?.data?.existingGovernanceTokenInfo?._error
+                errors.creator?.data?.existingGovernanceNftCollectionAddress ||
+                errors.creator?.data?.existingCollectionInfo
               }
             />
           </div>
-          <FormattedJsonDisplay
-            jsonLoadable={existingGovernanceTokenInfoLoadable}
-            title={t('title.collectionInfo')}
-          />
-          <FormattedJsonDisplay
-            jsonLoadable={numOfTokensLoadable}
-            title={t('title.totalSupply')}
-          />
+
+          {!!existingAddressValid &&
+            (collectionInfoLoadable.isPending ? (
+              <Loader />
+            ) : !collectionInfoLoadable.isError ? (
+              <p className="primary-text text-text-interactive-valid">
+                ${collectionInfoLoadable.data.symbol}
+              </p>
+            ) : (
+              <InputErrorMessage error={collectionInfoLoadable.error} />
+            ))}
         </div>
       </div>
     </>

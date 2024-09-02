@@ -2,11 +2,10 @@ import {
   ActionContextType,
   ActionKeyAndData,
   ActionOptions,
-  CosmosMsgForEmpty,
   LoadedActions,
+  UnifiedCosmosMsg,
 } from '@dao-dao/types'
 
-import { transformBech32Address } from './conversion'
 import { getAccountAddress } from './dao'
 
 // Convert action data to a Cosmos message given all loaded actions.
@@ -20,7 +19,7 @@ export const convertActionsToMessages = (
   }: {
     throwErrors?: boolean
   } = {}
-): CosmosMsgForEmpty[] =>
+): UnifiedCosmosMsg[] =>
   actions
     .map(({ actionKey, data }) => {
       // If no action, skip it.
@@ -59,11 +58,14 @@ export const convertActionsToMessages = (
       }
     })
     // Filter out undefined messages.
-    .filter(Boolean) as CosmosMsgForEmpty[]
+    .filter(Boolean) as UnifiedCosmosMsg[]
 
-// Get the address for the given action options for the given chain. If a DAO,
-// this is the address of the native address on the same chain or the polytone
-// proxy on that chain. For a wallet, this is the transformed bech32 address.
+/**
+ * Get the address for the given action options for the given chain. If a DAO,
+ * this is the address of the native address on the same chain or the polytone
+ * proxy on that chain. For a wallet, this is the address registered in the
+ * wallet's profile, if any.
+ */
 export const getChainAddressForActionOptions = (
   { context, chain, address }: ActionOptions,
   chainId: string
@@ -74,10 +76,10 @@ export const getChainAddressForActionOptions = (
     : // If on different chain, return DAO's polytone proxy address.
     context.type === ActionContextType.Dao
     ? getAccountAddress({
-        accounts: context.info.accounts,
+        accounts: context.dao.accounts,
         chainId,
       })
-    : // If on different chain, return wallet's transformed bech32 address.
+    : // If on different chain, return wallet's chain profile address if set.
     context.type === ActionContextType.Wallet
-    ? transformBech32Address(address, chainId)
+    ? context.profile?.chains[chainId]?.address
     : undefined

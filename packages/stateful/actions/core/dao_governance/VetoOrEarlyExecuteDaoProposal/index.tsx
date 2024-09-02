@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect } from 'react'
 import { useFormContext } from 'react-hook-form'
 
@@ -18,8 +19,9 @@ import {
   ContractName,
   decodeCw1WhitelistExecuteMsg,
   decodePolytoneExecuteMsg,
+  getChainAddressForActionOptions,
   makeCw1WhitelistExecuteMessage,
-  makeWasmMessage,
+  makeExecuteSmartContractMessage,
   maybeMakePolytoneExecuteMessage,
   objectMatchesStructure,
 } from '@dao-dao/utils'
@@ -29,10 +31,9 @@ import {
   EntityDisplay,
   ProposalLine,
 } from '../../../../components'
-import {
-  daoInfoSelector,
-  daosWithVetoableProposalsSelector,
-} from '../../../../recoil'
+import { useQueryLoadingDataWithError } from '../../../../hooks'
+import { daoQueries } from '../../../../queries/dao'
+import { daosWithVetoableProposalsSelector } from '../../../../recoil'
 import { useActionOptions } from '../../../react'
 import {
   VetoOrEarlyExecuteDaoProposalComponent as StatelessVetoOrEarlyExecuteDaoProposalComponent,
@@ -100,13 +101,17 @@ const Component: ActionComponent<
     setValue,
   ])
 
-  const selectedDaoInfo = useCachedLoadingWithError(
-    chainId && coreAddress
-      ? daoInfoSelector({
-          chainId,
-          coreAddress,
-        })
-      : undefined
+  const queryClient = useQueryClient()
+  const selectedDaoInfo = useQueryLoadingDataWithError(
+    daoQueries.info(
+      queryClient,
+      chainId && coreAddress
+        ? {
+            chainId,
+            coreAddress,
+          }
+        : undefined
+    )
   )
 
   // Select first proposal once loaded if nothing selected.
@@ -196,7 +201,13 @@ const Component: ActionComponent<
 
 export const makeVetoOrEarlyExecuteDaoProposalAction: ActionMaker<
   VetoOrEarlyExecuteDaoProposalData
-> = ({ t, chain: { chain_id: currentChainId }, address }) => {
+> = (options) => {
+  const {
+    t,
+    chain: { chain_id: currentChainId },
+    address,
+  } = options
+
   const useDefaults: UseDefaults<VetoOrEarlyExecuteDaoProposalData> = () => ({
     chainId: currentChainId,
     coreAddress: '',
@@ -217,16 +228,16 @@ export const makeVetoOrEarlyExecuteDaoProposalAction: ActionMaker<
         action,
         cw1WhitelistVetoer,
       }) => {
-        const msg = makeWasmMessage({
-          wasm: {
-            execute: {
-              contract_addr: proposalModuleAddress,
-              funds: [],
-              msg: {
-                [action === 'veto' ? 'veto' : 'execute']: {
-                  proposal_id: proposalId,
-                },
-              },
+        const actionSender =
+          getChainAddressForActionOptions(options, chainId) || ''
+
+        const msg = makeExecuteSmartContractMessage({
+          chainId,
+          sender: cw1WhitelistVetoer || actionSender,
+          contractAddress: proposalModuleAddress,
+          msg: {
+            [action === 'veto' ? 'veto' : 'execute']: {
+              proposal_id: proposalId,
             },
           },
         })
@@ -235,7 +246,12 @@ export const makeVetoOrEarlyExecuteDaoProposalAction: ActionMaker<
           currentChainId,
           chainId,
           cw1WhitelistVetoer
-            ? makeCw1WhitelistExecuteMessage(cw1WhitelistVetoer, msg)
+            ? makeCw1WhitelistExecuteMessage({
+                chainId,
+                sender: actionSender,
+                cw1WhitelistContract: cw1WhitelistVetoer,
+                msg,
+              })
             : msg
         )
       },

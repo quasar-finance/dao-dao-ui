@@ -1,6 +1,5 @@
 import { ComponentType, ReactNode, RefAttributes } from 'react'
 
-import { GenericToken } from '.'
 import { ChainId, WithChainId } from './chain'
 import {
   ButtonLinkProps,
@@ -8,8 +7,10 @@ import {
   ModalProps,
   StatefulEntityDisplayProps,
 } from './components'
+import { Duration } from './contracts/common'
 import { ContractInfoResponse } from './contracts/Cw721Base'
 import { LoadingDataWithError } from './misc'
+import { GenericToken } from './token'
 
 // Shape of type returned from Stargaze GraphQL indexer queries in
 // @dao-dao/state
@@ -30,12 +31,26 @@ export type StargazeNft = {
   } | null
   media?: {
     url?: string | null
+    // Need to allow string values of enum because TypeScript does not think the
+    // enums are compatible even with the same values.
+    type?: `${StargazeNftMediaType}` | null
     visualAssets?: {
       lg?: {
         url?: string | null
       } | null
     } | null
   } | null
+}
+
+export enum StargazeNftMediaType {
+  AnimatedImage = 'animated_image',
+  Audio = 'audio',
+  Html = 'html',
+  Image = 'image',
+  Pdf = 'pdf',
+  Unknown = 'unknown',
+  VectorGraphic = 'vector_graphic',
+  Video = 'video',
 }
 
 export interface NativeStargazeCollectionInfo {
@@ -150,4 +165,5 @@ export type NftSelectionModalProps = Omit<ModalProps, 'children' | 'header'> &
     headerDisplay?: ReactNode
     // What displays when there are no NFTs.
     noneDisplay?: ReactNode
+    unstakingDuration?: Duration | null
   }

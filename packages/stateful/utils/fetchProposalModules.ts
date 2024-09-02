@@ -1,31 +1,29 @@
+import { QueryClient } from '@tanstack/react-query'
+
 import {
   CwCoreV1QueryClient,
-  DaoCoreV2QueryClient,
+  DaoDaoCoreQueryClient,
 } from '@dao-dao/state/contracts'
-import { queryIndexer } from '@dao-dao/state/indexer'
+import { indexerQueries } from '@dao-dao/state/query'
 import {
-  ChainId,
   ContractVersion,
-  Feature,
   ProposalModule,
   ProposalModuleType,
 } from '@dao-dao/types'
 import { InfoResponse } from '@dao-dao/types/contracts/common'
-import { ProposalModuleWithInfo } from '@dao-dao/types/contracts/DaoCore.v2'
+import { ProposalModuleWithInfo } from '@dao-dao/types/contracts/DaoDaoCore'
 import {
   DaoProposalMultipleAdapterId,
   DaoProposalSingleAdapterId,
-  NEUTRON_GOVERNANCE_DAO,
-  cosmWasmClientRouter,
-  getRpcForChainId,
+  getCosmWasmClientForChainId,
   indexToProposalModulePrefix,
-  isFeatureSupportedByVersion,
   parseContractVersion,
 } from '@dao-dao/utils'
 
 import { matchAdapter } from '../proposal-module-adapter'
 
 export const fetchProposalModules = async (
+  queryClient: QueryClient,
   chainId: string,
   coreAddress: string,
   coreVersion: ContractVersion,
@@ -35,12 +33,13 @@ export const fetchProposalModules = async (
   // Try indexer first.
   if (!activeProposalModules) {
     try {
-      activeProposalModules = await queryIndexer({
-        type: 'contract',
-        address: coreAddress,
-        formula: 'daoCore/activeProposalModules',
-        chainId,
-      })
+      activeProposalModules = await queryClient.fetchQuery(
+        indexerQueries.queryContract(queryClient, {
+          chainId,
+          contractAddress: coreAddress,
+          formula: 'daoCore/activeProposalModules',
+        })
+      )
     } catch (err) {
       // Ignore error.
       console.error(err)
@@ -56,8 +55,9 @@ export const fetchProposalModules = async (
   }
 
   const proposalModules: ProposalModule[] = await Promise.all(
-    activeProposalModules.map(async ({ info, address, prefix }, index) => {
-      const version = (info && parseContractVersion(info.version)) ?? null
+    activeProposalModules.map(async ({ info, address, prefix }) => {
+      const version =
+        (info && parseContractVersion(info.version)) ?? ContractVersion.Unknown
 
       // Get adapter for this contract.
       const adapter = info && matchAdapter(info.contract)
@@ -72,27 +72,19 @@ export const fetchProposalModules = async (
 
       const [prePropose, veto] = await Promise.allSettled([
         // Get pre-propose address if exists.
-        adapter?.functions.fetchPrePropose?.(chainId, address, version),
+        adapter?.functions.fetchPrePropose?.(
+          queryClient,
+          chainId,
+          address,
+          version
+        ),
         // Get veto config if exists.
         adapter?.functions.fetchVetoConfig?.(chainId, address, version),
       ])
 
       return {
         address,
-        prefix:
-          // Follow Neutron's naming convention. Shift prefix alphabet starting
-          // point from A to N.
-          chainId === ChainId.NeutronMainnet &&
-          coreAddress === NEUTRON_GOVERNANCE_DAO
-            ? String.fromCharCode(
-                prefix.charCodeAt(0) + ('N'.charCodeAt(0) - 'A'.charCodeAt(0))
-              )
-            : isFeatureSupportedByVersion(
-                Feature.StaticProposalModulePrefixes,
-                coreVersion
-              )
-            ? prefix
-            : indexToProposalModulePrefix(index),
+        prefix,
         contractName: info?.contract || '',
         version,
         prePropose:
@@ -120,7 +112,7 @@ export const fetchProposalModulesWithInfoFromChain = async (
   coreAddress: string,
   coreVersion: ContractVersion
 ): Promise<ProposalModuleWithInfo[]> => {
-  const cwClient = await cosmWasmClientRouter.connect(getRpcForChainId(chainId))
+  const cwClient = await getCosmWasmClientForChainId(chainId)
 
   let paginationStart: string | undefined
 
@@ -154,7 +146,7 @@ export const fetchProposalModulesWithInfoFromChain = async (
 
   const getV2ProposalModules = async () =>
     (
-      await new DaoCoreV2QueryClient(
+      await new DaoDaoCoreQueryClient(
         cwClient,
         coreAddress
       ).activeProposalModules({

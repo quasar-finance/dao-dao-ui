@@ -8,7 +8,7 @@ import {
   ThumbUpOutlined,
 } from '@mui/icons-material'
 import clsx from 'clsx'
-import { ComponentProps, useCallback, useEffect } from 'react'
+import { ComponentProps, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import TimeAgo from 'react-timeago'
 import { useRecoilValue } from 'recoil'
@@ -24,17 +24,16 @@ import {
   useConfiguredChainContext,
   useDaoInfoContext,
   useDaoNavHelpers,
+  useExecuteAt,
   useTranslatedTimeDeltaFormatter,
 } from '@dao-dao/stateless'
 import {
   BaseProposalStatusAndInfoProps,
   CheckedDepositInfo,
-  ContractVersion,
   DepositRefundPolicy,
   PreProposeModuleType,
   ProposalStatusEnum,
 } from '@dao-dao/types'
-import { Vote } from '@dao-dao/types/contracts/DaoProposalSingle.common'
 import {
   formatDateTimeTz,
   formatPercentOf100,
@@ -44,13 +43,10 @@ import {
 import { ButtonLink, SuspenseLoader } from '../../../../components'
 import { EntityDisplay } from '../../../../components/EntityDisplay'
 import {
-  CwProposalSingleV1Hooks,
-  DaoProposalSingleV2Hooks,
   useAwaitNextBlock,
   useProposalActionState,
-  useProposalPolytoneState,
+  useProposalRelayState,
   useProposalVetoState,
-  useWallet,
 } from '../../../../hooks'
 import { useProposalModuleAdapterOptions } from '../../../react'
 import {
@@ -130,7 +126,6 @@ const InnerProposalStatusAndInfo = ({
   const { coreAddress } = useDaoInfoContext()
   const { getDaoProposalPath } = useDaoNavHelpers()
   const { proposalModule, proposalNumber } = useProposalModuleAdapterOptions()
-  const { address: walletAddress = '' } = useWallet()
 
   const config = useRecoilValue(
     DaoProposalSingleCommonSelectors.configSelector({
@@ -175,24 +170,7 @@ const InnerProposalStatusAndInfo = ({
 
   const timeAgoFormatter = useTranslatedTimeDeltaFormatter({ words: false })
 
-  const executeProposal = (
-    proposalModule.version === ContractVersion.V1
-      ? CwProposalSingleV1Hooks.useExecute
-      : DaoProposalSingleV2Hooks.useExecute
-  )({
-    contractAddress: proposalModule.address,
-    sender: walletAddress,
-  })
-  const closeProposal = (
-    proposalModule.version === ContractVersion.V1
-      ? CwProposalSingleV1Hooks.useClose
-      : DaoProposalSingleV2Hooks.useClose
-  )({
-    contractAddress: proposalModule.address,
-    sender: walletAddress,
-  })
-
-  const polytoneState = useProposalPolytoneState({
+  const relayState = useProposalRelayState({
     msgs: proposal.msgs,
     status: proposal.status,
     executedAt: proposal.executedAt,
@@ -203,30 +181,17 @@ const InnerProposalStatusAndInfo = ({
   })
   const { action, footer } = useProposalActionState({
     statusKey,
-    polytoneState,
+    relayState,
     loadingExecutionTxHash,
-    executeProposal,
-    closeProposal,
     onExecuteSuccess,
     onCloseSuccess,
   })
 
   const awaitNextBlock = useAwaitNextBlock()
-  // Refresh proposal and list of proposals (for list status) once voting ends.
-  useEffect(() => {
-    if (
-      statusKey !== ProposalStatusEnum.Open ||
-      !timestampInfo?.expirationDate
-    ) {
-      return
-    }
-
-    const msRemaining = timestampInfo?.expirationDate.getTime() - Date.now()
-    if (msRemaining < 0) {
-      return
-    }
-
-    const timeout = setTimeout(() => {
+  // Refresh proposal and list of proposals (for list status) once voting or
+  // veto period ends.
+  useExecuteAt({
+    fn: () => {
       // Refresh immediately so that the timestamp countdown re-renders and
       // hides itself.
       refreshProposal()
@@ -234,15 +199,14 @@ const InnerProposalStatusAndInfo = ({
       // and refresh the list of all proposals so the status gets updated there
       // as well.
       awaitNextBlock().then(refreshProposalAndAll)
-    }, msRemaining)
-    return () => clearTimeout(timeout)
-  }, [
-    timestampInfo?.expirationDate,
-    statusKey,
-    refreshProposal,
-    refreshProposalAndAll,
-    awaitNextBlock,
-  ])
+    },
+    date:
+      statusKey === ProposalStatusEnum.Open
+        ? timestampInfo.expirationDate
+        : statusKey === 'veto_timelock'
+        ? vetoTimelockExpiration
+        : undefined,
+  })
 
   const { vetoEnabled, canBeVetoed, vetoOrEarlyExecute, vetoInfoItems } =
     useProposalVetoState({
@@ -253,7 +217,7 @@ const InnerProposalStatusAndInfo = ({
       onExecuteSuccess,
     })
 
-  const info: ProposalStatusAndInfoProps<Vote>['info'] = [
+  const info: ProposalStatusAndInfoProps['info'] = [
     {
       Icon: (props) => <Logo {...props} />,
       label: t('title.dao'),
@@ -317,9 +281,9 @@ const InnerProposalStatusAndInfo = ({
             label: t('title.revoting'),
             Value: (props) => <p {...props}>{t('info.enabled')}</p>,
           },
-        ] as ProposalStatusAndInfoProps<Vote>['info'])
+        ] as ProposalStatusAndInfoProps['info'])
       : []),
-    ...(timestampInfo?.display
+    ...(timestampInfo.display
       ? ([
           {
             Icon: HourglassTopRounded,
@@ -330,7 +294,7 @@ const InnerProposalStatusAndInfo = ({
               </Tooltip>
             ),
           },
-        ] as ProposalStatusAndInfoProps<Vote>['info'])
+        ] as ProposalStatusAndInfoProps['info'])
       : []),
     ...(vetoTimelockExpiration
       ? ([
@@ -348,7 +312,7 @@ const InnerProposalStatusAndInfo = ({
               </Tooltip>
             ),
           },
-        ] as ProposalStatusAndInfoProps<Vote>['info'])
+        ] as ProposalStatusAndInfoProps['info'])
       : []),
     ...(loadingExecutionTxHash.loading || loadingExecutionTxHash.data
       ? ([
@@ -381,7 +345,7 @@ const InnerProposalStatusAndInfo = ({
                 </div>
               ) : null,
           },
-        ] as ProposalStatusAndInfoProps<Vote>['info'])
+        ] as ProposalStatusAndInfoProps['info'])
       : []),
     ...(approvedProposalPath
       ? ([

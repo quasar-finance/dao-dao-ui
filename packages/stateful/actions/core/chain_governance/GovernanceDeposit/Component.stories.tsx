@@ -5,8 +5,8 @@ import {
   GovProposalVersion,
   GovProposalWithDecodedContent,
 } from '@dao-dao/types'
-import { ProposalStatus } from '@dao-dao/utils/protobuf/codegen/cosmos/gov/v1beta1/gov'
-import { SoftwareUpgradeProposal } from '@dao-dao/utils/protobuf/codegen/cosmos/upgrade/v1beta1/upgrade'
+import { ProposalStatus } from '@dao-dao/types/protobuf/codegen/cosmos/gov/v1beta1/gov'
+import { SoftwareUpgradeProposal } from '@dao-dao/types/protobuf/codegen/cosmos/upgrade/v1beta1/upgrade'
 
 import { GovProposalActionDisplay } from '../../../../components'
 import { TokenAmountDisplay } from '../../../../components/TokenAmountDisplay'
@@ -25,6 +25,7 @@ const Template: ComponentStory<typeof GovernanceDepositComponent> = (args) => (
 )
 
 export const makeProposal = (): GovProposalWithDecodedContent => ({
+  chainId: CHAIN_ID,
   version: GovProposalVersion.V1_BETA_1,
   id: 1n,
   title: 'Upgrade to v10 Alpha 1',

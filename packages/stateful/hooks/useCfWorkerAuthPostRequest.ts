@@ -1,45 +1,90 @@
-import { makeSignDoc } from '@cosmjs/amino'
+import { toHex } from '@cosmjs/encoding'
 import { useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { getNativeTokenForChainId } from '@dao-dao/utils'
+import { getChainForChainId, signOffChainAuth } from '@dao-dao/utils'
 
 import { useWallet } from './useWallet'
 
 // Cloudflare KV is slow to update, so keep track of the last successful nonce
 // that worked so we don't have to wait for the nonce query to update. Make this
 // a global variable so it persists across all hook uses.
-const lastSuccessfulNonceForApi: Record<string, number | undefined> = {}
+const lastSuccessfulNonceForApiAndPublicKey: Record<
+  string,
+  number | undefined
+> = {}
 
+/**
+ * Hook that makes it easy to interact with our various Cloudflare Workers that
+ * use off-chain wallet auth.
+ */
 export const useCfWorkerAuthPostRequest = (
   apiBase: string,
-  defaultSignatureType: string
+  defaultSignatureType: string,
+  // Optionally override the current chain context.
+  chainId?: string
 ) => {
   const { t } = useTranslation()
-  const {
-    getOfflineSignerAmino,
-    chain,
-    hexPublicKey,
-    address: walletAddress,
-  } = useWallet({
+  const { chain, hexPublicKey, chainWallet } = useWallet({
+    chainId,
     loadAccount: true,
   })
 
-  const ready = !hexPublicKey.loading && !!walletAddress
+  // Either the hex public key loaded, or we have a chain wallet that we can
+  // attempt connection to.
+  const ready = !hexPublicKey.loading || !!chainWallet
 
-  const postRequest = useCallback(
-    async <R = any>(
-      endpoint: string,
-      data?: Record<string, unknown>,
-      signatureType = defaultSignatureType
-    ): Promise<R> => {
-      if (!ready) {
+  const getHexPublicKey = useCallback(
+    async (overrideChainId?: string) => {
+      if (
+        !hexPublicKey.loading &&
+        // If override is the same as the wallet-connected chain.
+        overrideChainId === chain.chain_id
+      ) {
+        return hexPublicKey.data
+      }
+
+      const thisChainWallet = overrideChainId
+        ? chainWallet?.mainWallet.getChainWallet(
+            getChainForChainId(overrideChainId).chain_name
+          )
+        : chainWallet
+
+      // If hex public key not loaded, load it from the wallet.
+      if (!thisChainWallet) {
+        throw new Error(t('error.loadingData'))
+      }
+
+      // Attempt to connect if needed.
+      if (!thisChainWallet.isWalletConnected) {
+        await thisChainWallet.connect(false)
+      }
+
+      // If still disconnected, throw.
+      if (!thisChainWallet.isWalletConnected) {
         throw new Error(t('error.logInToContinue'))
       }
 
+      // Get public key from wallet client, if possible.
+      const publicKey = (
+        await thisChainWallet.client.getAccount?.(thisChainWallet.chainId)
+      )?.pubkey
+      if (!publicKey) {
+        throw new Error(t('error.unsupportedWallet'))
+      }
+
+      return toHex(publicKey)
+    },
+    [chain.chain_id, chainWallet, hexPublicKey, t]
+  )
+
+  const getNonce = useCallback(
+    async (overrideChainId?: string) => {
+      const hexPublicKey = await getHexPublicKey(overrideChainId)
+
       // Fetch nonce.
       const nonceResponse: { nonce: number } = await (
-        await fetch(`${apiBase}/nonce/${hexPublicKey.data}`, {
+        await fetch(`${apiBase}/nonce/${hexPublicKey}`, {
           cache: 'no-store',
         })
       ).json()
@@ -47,69 +92,61 @@ export const useCfWorkerAuthPostRequest = (
         !('nonce' in nonceResponse) ||
         typeof nonceResponse.nonce !== 'number'
       ) {
-        console.error(
-          'Failed to fetch nonce.',
-          nonceResponse,
-          hexPublicKey.data
-        )
+        console.error('Failed to fetch nonce.', nonceResponse, hexPublicKey)
         throw new Error(t('error.loadingData'))
       }
 
       // If nonce was already used, manually increment.
       let nonce = nonceResponse.nonce
-      const lastSuccessfulNonce = lastSuccessfulNonceForApi[apiBase] ?? -1
+      const lastSuccessfulNonce =
+        lastSuccessfulNonceForApiAndPublicKey[apiBase + ':' + hexPublicKey] ??
+        -1
       if (nonce <= lastSuccessfulNonce) {
         nonce = lastSuccessfulNonce + 1
       }
 
-      const dataWithAuth = {
-        ...data,
-        auth: {
-          type: signatureType,
-          nonce,
-          chainId: chain.chain_id,
-          chainFeeDenom: getNativeTokenForChainId(chain.chain_id)
-            .denomOrAddress,
-          chainBech32Prefix: chain.bech32_prefix,
-          publicKey: hexPublicKey.data,
-        },
+      return nonce
+    },
+    [apiBase, getHexPublicKey, t]
+  )
+
+  const postRequest = useCallback(
+    async <R = any>(
+      endpoint: string,
+      data?: Record<string, unknown>,
+      signatureType = defaultSignatureType,
+      // Override the current chain.
+      overrideChainId?: string
+    ): Promise<R> => {
+      const hexPublicKey = await getHexPublicKey(overrideChainId)
+
+      const thisChainWallet =
+        overrideChainId && overrideChainId !== chain.chain_id
+          ? chainWallet?.mainWallet.getChainWallet(
+              getChainForChainId(overrideChainId).chain_name
+            )
+          : chainWallet
+
+      const offlineSignerAmino =
+        await thisChainWallet?.client.getOfflineSignerAmino?.bind(
+          thisChainWallet.client
+        )?.(thisChainWallet.chainId)
+      if (!thisChainWallet?.address || !offlineSignerAmino) {
+        throw new Error(t('error.unsupportedWallet'))
       }
 
-      // Sign data.
-      const signDocAmino = makeSignDoc(
-        [
-          {
-            type: dataWithAuth.auth.type,
-            value: {
-              signer: walletAddress,
-              data: JSON.stringify(dataWithAuth, undefined, 2),
-            },
-          },
-        ],
-        {
-          gas: '0',
-          amount: [
-            {
-              denom: dataWithAuth.auth.chainFeeDenom,
-              amount: '0',
-            },
-          ],
-        },
-        chain.chain_id,
-        '',
-        0,
-        0
-      )
-      const {
-        signature: { signature },
-      } = await (
-        await getOfflineSignerAmino()
-      ).signAmino(walletAddress, signDocAmino)
+      // Fetch nonce.
+      const nonce = await getNonce(overrideChainId)
 
-      const body = {
-        data: dataWithAuth,
-        signature,
-      }
+      const body = await signOffChainAuth({
+        type: signatureType,
+        nonce,
+        chainId: thisChainWallet.chainId,
+        address: thisChainWallet.address,
+        hexPublicKey,
+        data,
+        offlineSignerAmino,
+      })
 
       // Send request.
       const response = await fetch(apiBase + endpoint, {
@@ -133,23 +170,26 @@ export const useCfWorkerAuthPostRequest = (
       }
 
       // If succeeded, store nonce.
-      lastSuccessfulNonceForApi[apiBase] = nonce
+      lastSuccessfulNonceForApiAndPublicKey[apiBase + ':' + hexPublicKey] =
+        nonce
 
       // If response OK, return response body.
       return await response.json()
     },
     [
       defaultSignatureType,
-      ready,
-      apiBase,
-      hexPublicKey,
+      getHexPublicKey,
       chain.chain_id,
-      chain.bech32_prefix,
-      walletAddress,
-      getOfflineSignerAmino,
+      chainWallet,
+      getNonce,
+      apiBase,
       t,
     ]
   )
 
-  return { ready, postRequest }
+  return {
+    ready,
+    postRequest,
+    getNonce,
+  }
 }

@@ -1,11 +1,11 @@
 import { ActionCategoryKey, ActionCategoryMaker } from '@dao-dao/types'
 
 import { makeCreateCrossChainAccountAction } from './CreateCrossChainAccount'
+import { makeCreateDaoAction } from './CreateDao'
 import { makeDaoAdminExecAction } from './DaoAdminExec'
 import { makeEnableMultipleChoiceAction } from './EnableMultipleChoice'
 import { makeManageStorageItemsAction } from './ManageStorageItems'
 import { makeManageSubDaoPauseAction } from './ManageSubDaoPause'
-import { makeManageSubDaosAction } from './ManageSubDaos'
 import { makeManageVetoableDaosAction } from './ManageVetoableDaos'
 import { makeNeutronOverruleSubDaoProposalAction } from './NeutronOverruleSubDaoProposal'
 import { makeSetUpApproverAction } from './SetUpApprover'
@@ -25,7 +25,6 @@ export const makeDaoGovernanceActionCategory: ActionCategoryMaker = ({
   }),
   actionMakers: [
     makeEnableMultipleChoiceAction,
-    makeManageSubDaosAction,
     makeManageStorageItemsAction,
     makeDaoAdminExecAction,
     makeUpgradeV1ToV2Action,
@@ -37,5 +36,6 @@ export const makeDaoGovernanceActionCategory: ActionCategoryMaker = ({
     makeNeutronOverruleSubDaoProposalAction,
     makeUpdateProposalConfigAction,
     makeUpdatePreProposeConfigAction,
+    makeCreateDaoAction,
   ],
 })

@@ -27,6 +27,7 @@ import {
   useCachedLoading,
   useChain,
   useConfiguredChainContext,
+  useDaoNavHelpers,
 } from '@dao-dao/stateless'
 import {
   GenericToken,
@@ -34,19 +35,16 @@ import {
   GovProposalWithMetadata,
   TokenType,
 } from '@dao-dao/types'
+import { ProposalStatus } from '@dao-dao/types/protobuf/codegen/cosmos/gov/v1beta1/gov'
+import { MsgDeposit } from '@dao-dao/types/protobuf/codegen/cosmos/gov/v1beta1/tx'
 import {
   CHAIN_GAS_MULTIPLIER,
   convertDenomToMicroDenomStringWithDecimals,
   convertMicroDenomToDenomWithDecimals,
   formatPercentOf100,
-  getGovPath,
+  getDisplayNameForChainId,
   processError,
 } from '@dao-dao/utils'
-import {
-  ProposalStatus,
-  Vote,
-} from '@dao-dao/utils/protobuf/codegen/cosmos/gov/v1beta1/gov'
-import { MsgDeposit } from '@dao-dao/utils/protobuf/codegen/cosmos/gov/v1beta1/tx'
 
 import { useLoadingGovProposal, useWallet } from '../../hooks'
 import { ButtonLink } from '../ButtonLink'
@@ -105,7 +103,7 @@ const InnerGovProposalStatusAndInfo = ({
 }) => {
   const { t } = useTranslation()
   const {
-    chain: { chain_id: chainId, pretty_name: chainPrettyName },
+    chain: { chain_id: chainId },
     config: { name: chainConfigName },
   } = useConfiguredChainContext()
   const {
@@ -113,6 +111,7 @@ const InnerGovProposalStatusAndInfo = ({
     address: walletAddress = '',
     getSigningStargateClient,
   } = useWallet()
+  const { getDaoPath } = useDaoNavHelpers()
 
   const {
     id: proposalId,
@@ -139,17 +138,17 @@ const InnerGovProposalStatusAndInfo = ({
     depositToken.decimals
   )
 
-  const info: ProposalStatusAndInfoProps<Vote>['info'] = [
+  const info: ProposalStatusAndInfoProps['info'] = [
     {
       Icon: (props) => <Logo {...props} />,
       label: t('title.dao'),
       Value: (props) => (
         <ButtonLink
-          href={getGovPath(chainConfigName)}
+          href={getDaoPath(chainConfigName)}
           variant="underline"
           {...props}
         >
-          {chainPrettyName}
+          {getDisplayNameForChainId(chainId)}
         </ButtonLink>
       ),
     },
@@ -162,7 +161,7 @@ const InnerGovProposalStatusAndInfo = ({
               <EntityDisplay {...props} address={proposal.proposal.proposer} />
             ),
           },
-        ] as ProposalStatusAndInfoProps<Vote>['info'])
+        ] as ProposalStatusAndInfoProps['info'])
       : []),
     {
       Icon: RotateRightOutlined,
@@ -199,7 +198,7 @@ const InnerGovProposalStatusAndInfo = ({
               </Tooltip>
             ),
           },
-        ] as ProposalStatusAndInfoProps<Vote>['info'])
+        ] as ProposalStatusAndInfoProps['info'])
       : []),
   ]
 
@@ -354,17 +353,18 @@ const InnerProposalStatusAndInfoLoader = (
     config: { name },
     chain,
   } = useConfiguredChainContext()
+  const { getDaoPath } = useDaoNavHelpers()
 
   const LoaderP: ComponentType<{ className: string }> = ({ className }) => (
     <p className={clsx('animate-pulse', className)}>...</p>
   )
-  const info: ProposalStatusAndInfoProps<Vote>['info'] = [
+  const info: ProposalStatusAndInfoProps['info'] = [
     {
       Icon: (props) => <Logo {...props} />,
       label: t('title.dao'),
       Value: (props) => (
-        <ButtonLink href={getGovPath(name)} variant="underline" {...props}>
-          {chain.pretty_name}
+        <ButtonLink href={getDaoPath(name)} variant="underline" {...props}>
+          {getDisplayNameForChainId(chain.chain_id)}
         </ButtonLink>
       ),
     },

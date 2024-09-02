@@ -1,4 +1,4 @@
-import { Star } from '@mui/icons-material'
+import { Star, WarningRounded } from '@mui/icons-material'
 import clsx from 'clsx'
 import Fuse from 'fuse.js'
 import cloneDeep from 'lodash.clonedeep'
@@ -16,11 +16,12 @@ import {
   LoadedActions,
 } from '@dao-dao/types'
 
-import { useSearchFilter } from '../../hooks'
+import { useSearchFilter, useUpdatingRef } from '../../hooks'
 import { Button } from '../buttons'
 import { Collapsible } from '../Collapsible'
 import { SearchBar } from '../inputs'
 import { Loader } from '../logo'
+import { NoContent } from '../NoContent'
 import { TooltipInfoIcon } from '../tooltip'
 
 export type ActionLibraryProps = {
@@ -42,6 +43,12 @@ export type ActionLibraryProps = {
    * A callback when an action is selected.
    */
   onSelect?: (action: Action) => void
+  /**
+   * Whether or not to start with the library open.
+   *
+   * Defaults to true.
+   */
+  defaultOpen?: boolean
 }
 
 export const ActionLibrary = ({
@@ -49,6 +56,7 @@ export const ActionLibrary = ({
   loadedActions,
   actionDataFieldName,
   onSelect,
+  defaultOpen = true,
 }: ActionLibraryProps) => {
   const { t } = useTranslation()
 
@@ -61,8 +69,7 @@ export const ActionLibrary = ({
   })
   const actionData = watch(actionDataFieldName as 'actionData') || []
 
-  const onSelectRef = useRef(onSelect)
-  onSelectRef.current = onSelect
+  const onSelectRef = useUpdatingRef(onSelect)
   const onSelectAction = useCallback(
     (action: Action) => {
       const loadedAction = loadedActions[action.key]
@@ -83,7 +90,7 @@ export const ActionLibrary = ({
         data: cloneDeep(loadedAction.defaults ?? {}),
       })
     },
-    [addAction, loadedActions]
+    [addAction, loadedActions, onSelectRef]
   )
 
   const [_categoryKeySelected, setCategoryKeySelected] = useState<
@@ -130,9 +137,32 @@ export const ActionLibrary = ({
     ? categories.find((c) => c.key === categoryKeySelected)
     : undefined
 
-  const showingActions = categoryKeySelected
-    ? (selectedCategory || categories[0]).actions
-    : filteredActions.slice(0, 10).map(({ item }) => item)
+  const filterVisibleActions = (action: Action) =>
+    // Never show programmatic actions.
+    !action.programmaticOnly &&
+    // Never show actions that should be hidden from the picker.
+    !action.hideFromPicker &&
+    // Show if reusable or not already used.
+    (!action.notReusable || !actionData.some((a) => a.actionKey === action.key))
+
+  const showingActions = (
+    categoryKeySelected
+      ? (selectedCategory || categories[0]).actions.filter(filterVisibleActions)
+      : filteredActions
+          .map(({ item }) => item)
+          .filter(filterVisibleActions)
+          .slice(0, 10)
+  ).sort((a, b) =>
+    a.order !== undefined && b.order !== undefined
+      ? a.order - b.order
+      : // Prioritize the action with an order set.
+      a.order
+      ? -1
+      : b.order
+      ? 1
+      : // Leave them sorted by the original order in the category definition.
+        0
+  )
 
   // Ensure selected item is scrolled into view.
   useEffect(() => {
@@ -236,6 +266,7 @@ export const ActionLibrary = ({
   return (
     <Collapsible
       containerClassName="mt-2 flex flex-col gap-4 rounded-md border border-dashed border-border-primary p-4 relative"
+      defaultCollapsed={!defaultOpen}
       dropdownContainerClassName="!ml-0"
       label={t('title.actionLibrary')}
       labelClassName="!title-text"
@@ -280,20 +311,12 @@ export const ActionLibrary = ({
 
         <div className="hidden w-[1px] min-w-0 shrink-0 self-stretch bg-border-primary md:block"></div>
 
-        <div
-          className="flex min-w-0 grow flex-col gap-2 pt-1 md:pb-1"
-          ref={itemsListRef}
-        >
-          {showingActions
-            .filter(
-              (action) =>
-                // Never show programmatic actions.
-                !action.programmaticOnly &&
-                // Show if reusable or not already used.
-                (!action.notReusable ||
-                  !actionData.some((a) => a.actionKey === action.key))
-            )
-            .map((action, index) => (
+        {showingActions.length > 0 ? (
+          <div
+            className="flex min-w-0 grow flex-col gap-2 pt-1 md:pb-1"
+            ref={itemsListRef}
+          >
+            {showingActions.map((action, index) => (
               <Button
                 key={categoryKeySelected + action.key}
                 className={clsx(
@@ -332,7 +355,14 @@ export const ActionLibrary = ({
                 )}
               </Button>
             ))}
-        </div>
+          </div>
+        ) : (
+          <NoContent
+            Icon={WarningRounded}
+            body={t('info.nothingFound')}
+            className="self-center !border-0 grow md:-mt-4"
+          />
+        )}
       </div>
     </Collapsible>
   )

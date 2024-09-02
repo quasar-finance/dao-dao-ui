@@ -1,13 +1,10 @@
 import {
   Add,
   CheckRounded,
-  HomeOutlined,
+  Home,
   KeyboardDoubleArrowLeft,
   KeyboardDoubleArrowRight,
-  NotificationsOutlined,
-  PersonOutline,
   Search,
-  WidgetsOutlined,
 } from '@mui/icons-material'
 import { isMobile } from '@walletconnect/browser-utils'
 import clsx from 'clsx'
@@ -16,9 +13,10 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { DappNavigationProps } from '@dao-dao/types'
-import { SITE_TITLE, getGovPath } from '@dao-dao/utils'
+import { SITE_TITLE, getSupportedChains } from '@dao-dao/utils'
 
-import { useConfiguredChainContext, usePlatform } from '../../hooks'
+import { usePlatform } from '../../hooks'
+import { ChainLogo } from '../chain/ChainLogo'
 import { DaoDropdown } from '../dao'
 import { IconButton, ThemeToggle } from '../icon_buttons'
 import { Logo } from '../logo/Logo'
@@ -50,14 +48,12 @@ const getForceCompact = () =>
 
 export const DappNavigation = ({
   setCommandModalVisible,
-  inboxCount,
   followingDaos,
   walletConnected,
   compact,
   setCompact,
   mountedInBrowser,
   LinkWrapper,
-  SidebarWallet,
 }: DappNavigationProps) => {
   const { t } = useTranslation()
   const { isMac } = usePlatform()
@@ -67,8 +63,14 @@ export const DappNavigation = ({
       toggle: toggleResponsive,
     },
   } = useAppContext()
-  const { asPath } = useRouter()
-  const { config: chainConfig } = useConfiguredChainContext()
+  const { pathname, query } = useRouter()
+
+  const isHome = pathname === '/[[...tab]]'
+  const homeTabPath =
+    isHome && query?.tab && Array.isArray(query?.tab) ? query.tab[0] : undefined
+  const homeSelectedChainId = homeTabPath
+    ? getSupportedChains().find(({ name }) => name === homeTabPath)?.chainId
+    : undefined
 
   // Use screen resize to determine when compact should be forced on or off.
   const [forceCompact, setForceCompact] = useState<boolean | undefined>(
@@ -156,16 +158,34 @@ export const DappNavigation = ({
       >
         <PageHeader
           centerNode={
-            <LinkWrapper className="flex flex-row items-center gap-2" href="/">
-              <Logo size={28} />
+            <LinkWrapper
+              className={clsx(
+                'flex flex-row items-center',
+                // Increase space between logo and name if on chain-specific
+                // home page with offset overlayed chain icon.
+                homeSelectedChainId ? 'gap-3' : 'gap-2'
+              )}
+              href="/"
+            >
+              <div className="w-7 h-7 relative">
+                <Logo size={28} />
+
+                {/* Overlay chain icon on chain-specific home page. */}
+                {homeSelectedChainId && (
+                  <ChainLogo
+                    chainId={homeSelectedChainId}
+                    className="absolute -bottom-1.5 -right-1.5"
+                    size={18}
+                  />
+                )}
+              </div>
+
               {!compact && <p className="header-text">{SITE_TITLE}</p>}
             </LinkWrapper>
           }
           forceCenter={compact}
           noBorder={compact}
         />
-
-        <SidebarWallet />
 
         {/* If not compact, add some spacing. */}
         <div className={clsx(!compact && 'pt-2')}>
@@ -190,104 +210,68 @@ export const DappNavigation = ({
           />
 
           <Row
-            Icon={HomeOutlined}
+            Icon={Home}
             LinkWrapper={LinkWrapper}
             compact={compact}
             href="/"
             label={t('title.home')}
+            selected={isHome}
           />
 
-          <Row
-            Icon={WidgetsOutlined}
-            LinkWrapper={LinkWrapper}
-            compact={compact}
-            href={getGovPath(chainConfig.name)}
-            label={t('title.chains')}
-            selected={asPath.startsWith(getGovPath(''))}
-          />
-
-          {/* Only show me, inbox, and following when connected. */}
-          {walletConnected && (
-            <>
-              <Row
-                Icon={PersonOutline}
-                LinkWrapper={LinkWrapper}
-                compact={compact}
-                href="/me"
-                label={t('title.account')}
-                selected={asPath.startsWith('/me')}
-              />
-
-              <Row
-                Icon={NotificationsOutlined}
-                LinkWrapper={LinkWrapper}
-                compact={compact}
-                href="/notifications"
-                label={
-                  !inboxCount.loading && inboxCount.data > 0
-                    ? t('title.notificationsWithCount', {
-                        count: inboxCount.data,
-                      })
-                    : t('title.notifications')
-                }
-                loading={inboxCount.loading}
-                showBadge={!inboxCount.loading && inboxCount.data > 0}
-              />
-
+          {/* Only show following when connected and following DAOs loaded. */}
+          {walletConnected &&
+            !followingDaos.loading &&
+            followingDaos.data.length > 0 && (
               <Row
                 Icon={CheckRounded}
                 LinkWrapper={LinkWrapper}
                 compact={compact}
                 defaultExpanded
                 label={t('title.following')}
-                loading={followingDaos.loading || followingDaos.updating}
+                loading={followingDaos.updating}
               >
-                {!followingDaos.loading && (
+                <div
+                  className={clsx(
+                    // 36rem is about the absolute height of all other elements
+                    // in the sidebar, so the remaining space is used for the
+                    // following DAOs. This number will need tweaking if the
+                    // sidebar changes.
+                    'no-scrollbar relative md:max-h-[calc(100dvh-36rem)] overflow-y-auto',
+                    compact && 'mt-1 w-min'
+                  )}
+                  ref={scrollableFollowingContainerRef}
+                >
+                  {/* Top border */}
                   <div
                     className={clsx(
-                      // 42rem is about the absolute height of all other
-                      // elements in the sidebar, so the remaining space is
-                      // used for the following DAOs. This number will need
-                      // tweaking if the sidebar changes.
-                      'relative md:max-h-[calc(100dvh-42rem)]',
-                      !followingDaos.loading && 'no-scrollbar overflow-y-auto',
-                      compact && 'mt-1 w-min'
+                      'sticky top-0 right-0 left-0 h-[1px] bg-border-primary transition-opacity',
+                      showFollowingTopBorder ? 'opacity-100' : 'opacity-0'
                     )}
-                    ref={scrollableFollowingContainerRef}
-                  >
-                    {/* Top border */}
-                    <div
-                      className={clsx(
-                        'sticky top-0 right-0 left-0 h-[1px] bg-border-primary transition-opacity',
-                        showFollowingTopBorder ? 'opacity-100' : 'opacity-0'
-                      )}
-                    ></div>
+                  ></div>
 
-                    {/* DAOs */}
-                    {followingDaos.data.map((dao, index) => (
-                      <DaoDropdown
-                        key={index}
-                        LinkWrapper={LinkWrapper}
-                        compact={compact}
-                        dao={dao}
-                        imageClassName="h-8 w-8 md:h-6 md:w-6"
-                        labelClassName="text-base md:text-sm"
-                        labelContainerClassName="gap-3 md:gap-2"
-                      />
-                    ))}
+                  {/* DAOs */}
+                  {followingDaos.data.map((dao, index) => (
+                    <DaoDropdown
+                      key={index}
+                      LinkWrapper={LinkWrapper}
+                      compact={compact}
+                      dao={dao}
+                      imageClassName="h-6 w-6"
+                      labelClassName="text-sm"
+                      labelContainerClassName="gap-2"
+                    />
+                  ))}
 
-                    {/* Bottom border */}
-                    <div
-                      className={clsx(
-                        'sticky right-0 bottom-0 left-0 h-[1px] bg-border-primary transition-opacity',
-                        showFollowingBottomBorder ? 'opacity-100' : 'opacity-0'
-                      )}
-                    ></div>
-                  </div>
-                )}
+                  {/* Bottom border */}
+                  <div
+                    className={clsx(
+                      'sticky right-0 bottom-0 left-0 h-[1px] bg-border-primary transition-opacity',
+                      showFollowingBottomBorder ? 'opacity-100' : 'opacity-0'
+                    )}
+                  ></div>
+                </div>
               </Row>
-            </>
-          )}
+            )}
 
           <Row
             Icon={Add}

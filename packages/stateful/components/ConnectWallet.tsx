@@ -33,7 +33,7 @@ export const ConnectWallet = (props: StatefulConnectWalletProps) => {
     disconnect,
     isWalletConnecting,
     chain: connectingToChain,
-  } = useChain(chainName)
+  } = useChain(chainName, false)
 
   return (
     <Tooltip
@@ -53,10 +53,11 @@ export const ConnectWallet = (props: StatefulConnectWalletProps) => {
                 connectingToChain.chain_id !== mainWalletChainId &&
                   mainWallet?.isWalletConnected
                   ? mainWallet.walletName
-                  : undefined
+                  : undefined,
+                false
               )
         }
-        variant="primary"
+        variant="brand"
         {...props}
       />
     </Tooltip>

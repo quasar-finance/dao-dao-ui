@@ -1,4 +1,5 @@
 import { fromBech32, toBech32, toHex } from '@cosmjs/encoding'
+import { UseQueryResult } from '@tanstack/react-query'
 import { TFunction } from 'next-i18next'
 import { Loadable } from 'recoil'
 
@@ -15,10 +16,10 @@ import { Expiration } from '@dao-dao/types/contracts/common'
 import { getChainForChainId } from './chain'
 import { IPFS_GATEWAY_TEMPLATE, SITE_URL } from './constants'
 
-export function convertMicroDenomToDenomWithDecimals(
+export const convertMicroDenomToDenomWithDecimals = (
   amount: number | string,
   decimals: number
-) {
+) => {
   if (typeof amount === 'string') {
     amount = Number(amount)
   }
@@ -26,10 +27,10 @@ export function convertMicroDenomToDenomWithDecimals(
   return isNaN(amount) ? 0 : amount
 }
 
-export function convertDenomToMicroDenomWithDecimals(
+export const convertDenomToMicroDenomWithDecimals = (
   amount: number | string,
   decimals: number
-) {
+) => {
   if (typeof amount === 'string') {
     amount = Number(amount)
   }
@@ -70,7 +71,7 @@ export const expirationAtTimeToSecondsFromNow = (exp: Expiration) => {
 }
 
 export const zeroPad = (num: number, target: number) => {
-  const s = num.toString()
+  const s = BigInt(num).toString()
   if (s.length >= target) {
     return s
   }
@@ -243,6 +244,139 @@ export const combineLoadingDataWithErrors = <T>(
         data: loadables.flatMap((l) => (l.loading || l.errored ? [] : l.data)),
       }
 
+/**
+ * Combine react-query results into LoadingData list. Filters out any errored
+ * results.
+ */
+export const makeCombineQueryResultsIntoLoadingData =
+  <T extends unknown = unknown, R extends unknown = T[]>({
+    firstLoad = 'all',
+    transform = (results: T[]) => results as R,
+  }: {
+    /**
+     * Whether or not to show loading until all of the results are loaded, at
+     * least one result is loaded, or none of the results are loaded. If 'one',
+     * will show not loading (just updating) once the first result is loaded. If
+     * 'none', will never show loading.
+     *
+     * Defaults to 'all'.
+     */
+    firstLoad?: 'all' | 'one' | 'none'
+    /**
+     * Optional transformation function that acts on combined list of data.
+     */
+    transform?: (results: T[]) => R
+  } = {}) =>
+  (results: UseQueryResult<T>[]): LoadingData<R> => {
+    const isLoading =
+      firstLoad === 'all'
+        ? results.some((r) => r.isPending)
+        : firstLoad === 'one'
+        ? results.every((r) => r.isPending)
+        : false
+
+    if (isLoading) {
+      return {
+        loading: true,
+      }
+    } else {
+      return {
+        loading: false,
+        updating: results.some((r) => r.isPending || r.isFetching),
+        // Cast data to T if not pending since it's possible that data has
+        // successfully loaded and returned undefined. isPending will be true if
+        // data is not yet loaded.
+        data: transform(
+          results.flatMap((r) =>
+            r.isPending || r.isError ? [] : [r.data as T]
+          )
+        ),
+      }
+    }
+  }
+
+/**
+ * Combine react-query results into LoadingDataWithError list.
+ */
+export const makeCombineQueryResultsIntoLoadingDataWithError =
+  <T extends unknown = unknown, R extends unknown = T[]>({
+    firstLoad = 'all',
+    loadIfNone = false,
+    errorIf = 'any',
+    transform = (results: T[]) => results as R,
+  }: {
+    /**
+     * Whether or not to show loading until all of the results are loaded, at
+     * least one result is loaded, or none of the results are loaded. If 'one',
+     * will show not loading again (just updating) once the first result is
+     * loaded. If 'none', will never show loading.
+     *
+     * Defaults to 'all'.
+     */
+    firstLoad?: 'all' | 'one' | 'none'
+    /**
+     * Whether or not to show loading when no queries are passed.
+     *
+     * Defaults to false.
+     */
+    loadIfNone?: boolean
+    /**
+     * Whether or not to show error if any of the results are errored or all. If
+     * set to 'all' but only some of the results are errored, the errored
+     * results will be filtered out of the data.
+     *
+     * Defaults to 'any'.
+     */
+    errorIf?: 'any' | 'all'
+    /**
+     * Optional transformation function that acts on combined list of data.
+     */
+    transform?: (results: T[]) => R
+  } = {}) =>
+  (results: UseQueryResult<T>[]): LoadingDataWithError<R> => {
+    const isLoading =
+      firstLoad === 'all'
+        ? (loadIfNone && results.length === 0) ||
+          results.some((r) => r.isPending)
+        : firstLoad === 'one'
+        ? results.length > 0 && results.every((r) => r.isPending)
+        : false
+    const isError =
+      errorIf === 'any'
+        ? results.some((r) => r.isError)
+        : errorIf === 'all'
+        ? results.length > 0 && results.every((r) => r.isError)
+        : false
+
+    if (isLoading) {
+      return {
+        loading: true,
+        errored: false,
+      }
+    } else if (isError) {
+      return {
+        loading: false,
+        errored: true,
+        // First error.
+        error: results.flatMap((r) => (r.isError ? r.error : []))[0],
+      }
+    } else {
+      return {
+        loading: false,
+        errored: false,
+        updating: results.some((r) => r.isPending || r.isFetching),
+        // Cast data to T if not pending since it's possible that data has
+        // successfully loaded and returned undefined. isPending will be true if
+        // data is not yet loaded. Filter out errored data.
+        data: transform(
+          results.flatMap((r) =>
+            r.isPending || r.isError ? [] : [r.data as T]
+          )
+        ),
+      }
+    }
+  }
+
 // Convert Recoil loadable into our generic data loader with error type. See the
 // comment above the LoadingData type for more details.
 export const loadableToLoadingDataWithError = <T>(
@@ -295,7 +429,7 @@ export const convertExpirationToDate = (
   // For converting height to rough date.
   currentBlockHeight: number
 ): Date | undefined =>
-  'at_height' in expiration && currentBlockHeight > 0
+  'at_height' in expiration && currentBlockHeight > 0 && blocksPerYear > 0
     ? new Date(
         Date.now() +
           convertBlocksToSeconds(
@@ -364,8 +498,14 @@ export const toAccessibleImageUrl = (
   // of our NextJS allowed image sources. Thus proxy it through a whitelisted
   // domain. This only needs to be used for images that are displayed in the
   // NextJS Image component, which is why it is optional and off by default.
-  if (proxy && !url.includes('ipfs')) {
-    url = `https://img-proxy.ekez.workers.dev/${url}`
+  if (
+    proxy &&
+    url.startsWith('http') &&
+    !url.includes('ipfs.daodao.zone') &&
+    !url.includes('ipfs.stargaze.zone') &&
+    !url.includes('ipfs-gw.stargaze-apis.com')
+  ) {
+    url = `https://img-proxy.daodao.zone/?url=${encodeURIComponent(url)}`
   }
 
   return url
@@ -389,18 +529,52 @@ export const toBech32Hash = (address: string) => {
   }
 }
 
-export const concatAddressStartEnd = (
-  address: string,
-  takeStart: number,
-  takeEnd: number
-) => {
-  const first = address.substring(0, takeStart)
-  const last = address.substring(address.length - takeEnd, address.length)
+/**
+ * Shrinks a string by slicing off the start and end and joining them with
+ * ellipses. Useful for displaying addresses more compactly.
+ */
+export const abbreviateString = (
+  str: string,
+  /**
+   * The number of characters at the beginning to keep. If `takeEnd` is
+   * undefined, this applies to the end as well.
+   */
+  takeStartOrBoth: number,
+  /**
+   * The number of characters at the end to keep. If undefined,
+   * `takeStartOrBoth` is used.
+   */
+  takeEnd?: number
+): string => {
+  takeEnd ??= takeStartOrBoth
+
+  // Nothing to abbreviate if the string is as short as or shorter than the
+  // abbreviated length, which is the start, end, and 2 periods.
+  if (str.length <= takeStartOrBoth + takeEnd + 2) {
+    return str
+  }
+
+  const first = str.substring(0, takeStartOrBoth)
+  const last = str.substring(str.length - takeEnd, str.length)
   return [first, last].filter(Boolean).join('..')
 }
 
-export const concatAddressBoth = (address: string, takeN = 7): string =>
-  address && concatAddressStartEnd(address, takeN, takeN)
+/**
+ * Shrinks an address by slicing off the start and end and joining them with
+ * ellipses. Preserves the bech32 prefix in full.
+ */
+export const abbreviateAddress = (address: string, takeN = 4): string => {
+  // Use bech32 prefix length to determine how much to truncate from beginning.
+  let prefixLength
+  try {
+    prefixLength = fromBech32(address).prefix.length
+  } catch (e) {
+    // Conservative estimate.
+    prefixLength = 8
+  }
+
+  return abbreviateString(address, prefixLength + takeN, takeN)
+}
 
 /**
  * Transform an address from one chain to another sharing the same bech32 data.

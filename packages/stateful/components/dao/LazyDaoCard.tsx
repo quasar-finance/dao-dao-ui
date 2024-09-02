@@ -1,54 +1,79 @@
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import clsx from 'clsx'
 import { useTranslation } from 'react-i18next'
 
-import { useCachedLoadingWithError } from '@dao-dao/stateless'
 import { LazyDaoCardProps } from '@dao-dao/types'
 import { processError } from '@dao-dao/utils'
 
-import { daoCardInfoSelector } from '../../recoil'
+import { daoQueries } from '../../queries/dao'
 import { DaoCard } from './DaoCard'
 
 export const LazyDaoCard = (props: LazyDaoCardProps) => {
   const { t } = useTranslation()
 
-  const daoCardInfo = useCachedLoadingWithError(
-    daoCardInfoSelector({
-      chainId: props.chainId,
-      coreAddress: props.coreAddress,
+  const daoInfoQuery = useQuery(
+    daoQueries.info(useQueryClient(), {
+      chainId: props.info.chainId,
+      coreAddress: props.info.coreAddress,
     })
   )
 
-  return daoCardInfo.loading ? (
+  return daoInfoQuery.isPending ? (
     <DaoCard
       {...props}
       className={clsx('animate-pulse', props.className)}
-      lazyData={{
-        loading: true,
+      info={{
+        ...props.info,
+        // Unused.
+        supportedFeatures: {} as any,
+        votingModuleAddress: '',
+        votingModuleInfo: {
+          contract: '',
+          version: '',
+        },
+        proposalModules: [],
+        created: null,
+        isActive: true,
+        activeThreshold: null,
+        items: {},
+        polytoneProxies: {},
+        accounts: [],
+        parentDao: null,
+        admin: '',
+        contractAdmin: null,
       }}
-      polytoneProxies={{}}
-      showingEstimatedUsdValue={false}
-      tokenDecimals={0}
-      tokenSymbol=""
     />
-  ) : daoCardInfo.errored || !daoCardInfo.data ? (
+  ) : daoInfoQuery.isError ? (
     <DaoCard
       {...props}
-      description={processError(
-        daoCardInfo.errored ? daoCardInfo.error : t('error.loadingData'),
-        {
-          forceCapture: false,
-        }
-      )}
-      lazyData={{
-        loading: true,
+      info={{
+        ...props.info,
+        description:
+          t('error.unexpectedError') +
+          '\n' +
+          processError(daoInfoQuery.error, {
+            forceCapture: false,
+          }),
+        // Unused.
+        supportedFeatures: {} as any,
+        votingModuleAddress: '',
+        votingModuleInfo: {
+          contract: '',
+          version: '',
+        },
+        proposalModules: [],
+        created: null,
+        isActive: true,
+        activeThreshold: null,
+        items: {},
+        polytoneProxies: {},
+        accounts: [],
+        parentDao: null,
+        admin: '',
+        contractAdmin: null,
       }}
-      name={t('error.unexpectedError')}
-      polytoneProxies={{}}
-      showingEstimatedUsdValue={false}
-      tokenDecimals={0}
-      tokenSymbol=""
     />
   ) : (
-    <DaoCard {...daoCardInfo.data} />
+    <DaoCard info={daoInfoQuery.data} />
   )
 }

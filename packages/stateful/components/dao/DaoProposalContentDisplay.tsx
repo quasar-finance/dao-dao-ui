@@ -10,6 +10,7 @@ import {
   PreProposeModuleType,
   ProposalPrefill,
 } from '@dao-dao/types'
+import { encodeJsonToBase64 } from '@dao-dao/utils'
 
 import { useActionsForMatching } from '../../actions'
 import { useEntity } from '../../hooks'
@@ -42,7 +43,7 @@ export const DaoProposalContentDisplay = ({
     proposalModule.prePropose?.type === PreProposeModuleType.Approver
       ? proposalModule.prePropose.config.approvalDao
       : proposalInfo.createdByAddress
-  const loadingEntity = useEntity(creatorAddress)
+  const { entity } = useEntity(creatorAddress)
 
   const { refreshProposal, refreshing } = useProposalRefreshers()
 
@@ -59,7 +60,7 @@ export const DaoProposalContentDisplay = ({
   // duplicate button remains hidden until the form data is loaded.
   const duplicateUrl = duplicateFormData
     ? getDaoProposalPath(coreAddress, 'create', {
-        prefill: JSON.stringify(prefill),
+        prefill: encodeJsonToBase64(prefill),
       })
     : undefined
 
@@ -74,7 +75,7 @@ export const DaoProposalContentDisplay = ({
       }
       creator={{
         address: creatorAddress,
-        entity: loadingEntity,
+        entity,
       }}
       description={proposalInfo.description}
       duplicateUrl={duplicateUrl}

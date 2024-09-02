@@ -4,7 +4,8 @@ import { constSelector, useRecoilValueLoadable } from 'recoil'
 
 import {
   CommonNftSelectors,
-  DaoCoreV2Selectors,
+  DaoDaoCoreSelectors,
+  nftCardInfoWithUriSelector,
   nftUriDataSelector,
 } from '@dao-dao/state/recoil'
 import { Loader, useCachedLoading } from '@dao-dao/stateless'
@@ -17,7 +18,6 @@ import {
 import { getChainForChainId, isValidBech32Address } from '@dao-dao/utils'
 
 import { AddressInput } from '../../../../components'
-import { nftCardInfoWithUriSelector } from '../../../../recoil'
 import { useActionOptions } from '../../../react'
 import { MintNft as StatelessMintNft } from './stateless/MintNft'
 import { MintNftData } from './types'
@@ -97,7 +97,7 @@ export const MintNft: ActionComponent = (props) => {
   // Get all collections in DAO.
   const daoCollections = useRecoilValueLoadable(
     props.isCreating && context.type === ActionContextType.Dao
-      ? DaoCoreV2Selectors.allCw721CollectionsSelector({
+      ? DaoDaoCoreSelectors.allCw721CollectionsSelector({
           contractAddress: address,
           chainId: currentChainId,
         })

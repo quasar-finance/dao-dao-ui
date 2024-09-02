@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { constSelector, useRecoilValueLoadable } from 'recoil'
 
 import { genericTokenBalancesSelector } from '@dao-dao/state'
-import { DaoCoreV2Selectors } from '@dao-dao/state/recoil'
+import { DaoDaoCoreSelectors } from '@dao-dao/state/recoil'
 import { Loader, useCachedLoading } from '@dao-dao/stateless'
 import {
   ActionChainContextType,
@@ -15,6 +15,7 @@ import {
 } from '@dao-dao/types'
 import { InstantiateMsg } from '@dao-dao/types/contracts/CwTokenSwap'
 import {
+  convertDenomToMicroDenomStringWithDecimals,
   convertDenomToMicroDenomWithDecimals,
   getNativeTokenForChainId,
   instantiateSmartContract,
@@ -23,8 +24,8 @@ import {
 } from '@dao-dao/utils'
 
 import { AddressInput, Trans } from '../../../../../components'
+import { useEntity } from '../../../../../hooks'
 import { useWallet } from '../../../../../hooks/useWallet'
-import { entitySelector } from '../../../../../recoil'
 import { useTokenBalances } from '../../../../hooks/useTokenBalances'
 import { useActionOptions } from '../../../../react'
 import { InstantiateTokenSwap as StatelessInstantiateTokenSwap } from '../stateless/InstantiateTokenSwap'
@@ -50,7 +51,7 @@ export const InstantiateTokenSwap: ActionComponent<
   }
 
   const { setValue } = useFormContext()
-  const { address: walletAddress, getSigningCosmWasmClient } = useWallet()
+  const { address: walletAddress, getSigningClient } = useWallet()
 
   const selfPartyTokenBalances = useTokenBalances()
 
@@ -78,19 +79,19 @@ export const InstantiateTokenSwap: ActionComponent<
               ? {
                   cw20: {
                     contract_addr: selfParty.denomOrAddress,
-                    amount: convertDenomToMicroDenomWithDecimals(
+                    amount: convertDenomToMicroDenomStringWithDecimals(
                       selfParty.amount,
                       selfParty.decimals
-                    ).toString(),
+                    ),
                   },
                 }
               : {
                   native: {
                     denom: selfParty.denomOrAddress,
-                    amount: convertDenomToMicroDenomWithDecimals(
+                    amount: convertDenomToMicroDenomStringWithDecimals(
                       selfParty.amount,
                       selfParty.decimals
-                    ).toString(),
+                    ),
                   },
                 },
         },
@@ -119,9 +120,8 @@ export const InstantiateTokenSwap: ActionComponent<
         },
       }
 
-      const signingCosmWasmClient = await getSigningCosmWasmClient()
       const contractAddress = await instantiateSmartContract(
-        signingCosmWasmClient,
+        getSigningClient,
         walletAddress,
         cwTokenSwapCodeId,
         'Token Swap',
@@ -150,11 +150,11 @@ export const InstantiateTokenSwap: ActionComponent<
     }
   }, [
     cwTokenSwapCodeId,
+    getSigningClient,
     props.data,
     props.fieldNamePrefix,
     selfAddress,
     setValue,
-    getSigningCosmWasmClient,
     t,
     walletAddress,
   ])
@@ -236,27 +236,23 @@ const InnerInstantiateTokenSwap: ActionComponent<
 
   // Get counterparty entity, which reverse engineers a DAO from its polytone
   // proxy.
-  const entityLoading = useCachedLoading(
+  const { entity } = useEntity(
     counterpartyAddress &&
       isValidBech32Address(counterpartyAddress, bech32Prefix)
-      ? entitySelector({
-          chainId,
-          address: counterpartyAddress,
-        })
-      : undefined,
-    undefined
+      ? counterpartyAddress
+      : ''
   )
 
   // Try to retrieve governance token address, failing if not a cw20-based DAO.
   const counterpartyDaoGovernanceTokenAddressLoadable = useRecoilValueLoadable(
-    !entityLoading.loading &&
-      entityLoading.data?.type === EntityType.Dao &&
+    !entity.loading &&
+      entity.data.type === EntityType.Dao &&
       // Only care about loading the governance token if on the chain we're
       // creating the token swap on.
-      entityLoading.data.chainId === chainId
-      ? DaoCoreV2Selectors.tryFetchGovernanceTokenAddressSelector({
+      entity.data.chainId === chainId
+      ? DaoDaoCoreSelectors.tryFetchGovernanceTokenAddressSelector({
           chainId,
-          contractAddress: entityLoading.data.address,
+          contractAddress: entity.data.address,
         })
       : constSelector(undefined)
   )
@@ -264,12 +260,12 @@ const InnerInstantiateTokenSwap: ActionComponent<
   // Load balances as loadables since they refresh automatically on a timer.
   const counterpartyTokenBalances = useCachedLoading(
     counterpartyAddress &&
-      !entityLoading.loading &&
-      entityLoading.data &&
+      !entity.loading &&
+      entity.data &&
       counterpartyDaoGovernanceTokenAddressLoadable.state !== 'loading'
       ? genericTokenBalancesSelector({
-          chainId: entityLoading.data.chainId,
-          address: entityLoading.data.address,
+          chainId: entity.data.chainId,
+          address: entity.data.address,
           cw20GovernanceTokenAddress:
             counterpartyDaoGovernanceTokenAddressLoadable.state === 'hasValue'
               ? counterpartyDaoGovernanceTokenAddressLoadable.contents

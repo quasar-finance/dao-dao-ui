@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { RecoilValue, constSelector, useRecoilValueLoadable } from 'recoil'
 import { useDeepCompareMemoize } from 'use-deep-compare-effect'
 
@@ -12,6 +12,8 @@ import {
   loadableToLoadingDataWithError,
   transformLoadingDataWithError,
 } from '@dao-dao/utils'
+
+import { useUpdatingRef } from './useUpdatingRef'
 
 const constSelectorRegex = /^__constant__selectorFamily\/(.+)\/\d+$/
 
@@ -59,8 +61,7 @@ export const useCachedLoadable = <T extends unknown>(
   const [updating, setUpdating] = useState(loadableLoadingOrNotReady)
 
   // Store the last cached key for use in the effect below.
-  const lastCachedKey = useRef(cachedKey)
-  lastCachedKey.current = cachedKey
+  const lastCachedKey = useUpdatingRef(cachedKey)
 
   useEffect(() => {
     if (loadableLoadingOrNotReady) {
@@ -104,7 +105,7 @@ export const useCachedLoadable = <T extends unknown>(
       setUpdating(false)
       setCachedKey(recoilValue?.key)
     }
-  }, [loadable, loadableLoadingOrNotReady, recoilValue])
+  }, [lastCachedKey, loadable, loadableLoadingOrNotReady, recoilValue])
 
   // Memoize the loadable so it can be used in `useEffect` dependencies to
   // prevent causing infinite loops. If this is not memoized, it will change on
@@ -166,9 +167,7 @@ export const useCachedLoadingWithError = <
   transform?: (data: T) => U
 ): LoadingDataWithError<U> => {
   const loadable = useCachedLoadable(recoilValue)
-
-  const transformRef = useRef(transform)
-  transformRef.current = transform
+  const transformRef = useUpdatingRef(transform)
 
   return useMemo(() => {
     const data = loadableToLoadingDataWithError(loadable)
@@ -176,7 +175,7 @@ export const useCachedLoadingWithError = <
       return transformLoadingDataWithError(data, transformRef.current)
     }
     return data as LoadingDataWithError<U>
-  }, [loadable])
+  }, [loadable, transformRef])
 }
 
 // Convert to LoadingData for convenience, memoized.
@@ -187,8 +186,7 @@ export const useCachedLoading = <T extends unknown>(
 ): LoadingData<T> => {
   const loadable = useCachedLoadable(recoilValue)
 
-  const onErrorRef = useRef(onError)
-  onErrorRef.current = onError
+  const onErrorRef = useUpdatingRef(onError)
 
   // Use deep compare to prevent memoize on every re-render if an object is
   // passed as the default value.
@@ -197,6 +195,6 @@ export const useCachedLoading = <T extends unknown>(
   return useMemo(
     () =>
       loadableToLoadingData(loadable, memoizedDefaultValue, onErrorRef.current),
-    [loadable, memoizedDefaultValue]
+    [loadable, memoizedDefaultValue, onErrorRef]
   )
 }

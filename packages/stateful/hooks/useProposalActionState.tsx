@@ -1,4 +1,3 @@
-import { ExecuteResult } from '@cosmjs/cosmwasm-stargate'
 import { CancelOutlined, Key, Send } from '@mui/icons-material'
 import { useCallback, useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
@@ -27,22 +26,15 @@ import {
 } from '@dao-dao/utils'
 
 import { ProfileProposalCard } from '../components'
-import { useProposalModuleAdapterOptions } from '../proposal-module-adapter'
+import { useProposalModuleAdapterContext } from '../proposal-module-adapter'
 import { useMembership } from './useMembership'
-import { UseProposalPolytoneStateReturn } from './useProposalPolytoneState'
+import { UseProposalRelayStateReturn } from './useProposalRelayState'
 import { useWallet } from './useWallet'
 
 export type UseProposalActionStateOptions = {
-  polytoneState: UseProposalPolytoneStateReturn
+  relayState: UseProposalRelayStateReturn
   statusKey: ProposalStatusKey
   loadingExecutionTxHash: LoadingData<string | undefined>
-  executeProposal: (
-    options: { proposalId: number },
-    // No need.
-    fee?: undefined,
-    memo?: string | undefined
-  ) => Promise<ExecuteResult>
-  closeProposal: (options: { proposalId: number }) => Promise<ExecuteResult>
   onExecuteSuccess: () => void | Promise<void>
   onCloseSuccess: () => void | Promise<void>
 }
@@ -58,11 +50,9 @@ export type UseProposalActionStateReturn = Pick<
  * components.
  */
 export const useProposalActionState = ({
-  polytoneState,
+  relayState,
   statusKey,
   loadingExecutionTxHash,
-  executeProposal,
-  closeProposal,
   onExecuteSuccess,
   onCloseSuccess,
 }: UseProposalActionStateOptions): UseProposalActionStateReturn => {
@@ -71,11 +61,16 @@ export const useProposalActionState = ({
     chain: { chain_id: chainId },
   } = useConfiguredChainContext()
   const { coreAddress, items } = useDaoInfoContext()
-  const { proposalModule, proposalNumber } = useProposalModuleAdapterOptions()
-  const { isWalletConnected } = useWallet()
-  const { isMember = false } = useMembership({
-    coreAddress,
-  })
+  const {
+    options: { proposalNumber },
+    proposalModule,
+  } = useProposalModuleAdapterContext()
+  const {
+    isWalletConnected,
+    address: walletAddress = '',
+    getSigningClient,
+  } = useWallet()
+  const { isMember = false } = useMembership()
 
   const config = useRecoilValue(
     DaoProposalSingleCommonSelectors.configSelector({
@@ -103,13 +98,12 @@ export const useProposalActionState = ({
 
     setActionLoading(true)
     try {
-      await executeProposal(
-        {
-          proposalId: proposalNumber,
-        },
-        undefined,
-        allowMemoOnExecute && memo ? memo : undefined
-      )
+      await proposalModule.execute({
+        proposalId: proposalNumber,
+        getSigningClient,
+        sender: walletAddress,
+        memo: allowMemoOnExecute && memo ? memo : undefined,
+      })
 
       await onExecuteSuccess()
     } catch (err) {
@@ -123,8 +117,10 @@ export const useProposalActionState = ({
     // Loading will stop on success when status refreshes.
   }, [
     isWalletConnected,
-    executeProposal,
+    proposalModule,
     proposalNumber,
+    getSigningClient,
+    walletAddress,
     allowMemoOnExecute,
     memo,
     onExecuteSuccess,
@@ -138,8 +134,10 @@ export const useProposalActionState = ({
     setActionLoading(true)
 
     try {
-      await closeProposal({
+      await proposalModule.close({
         proposalId: proposalNumber,
+        getSigningClient,
+        sender: walletAddress,
       })
 
       await onCloseSuccess()
@@ -152,12 +150,19 @@ export const useProposalActionState = ({
     }
 
     // Loading will stop on success when status refreshes.
-  }, [isWalletConnected, closeProposal, proposalNumber, onCloseSuccess])
+  }, [
+    isWalletConnected,
+    proposalModule,
+    proposalNumber,
+    getSigningClient,
+    walletAddress,
+    onCloseSuccess,
+  ])
 
-  const showPolytone =
-    !polytoneState.loading &&
+  const showRelayStatus =
+    !relayState.loading &&
     statusKey === ProposalStatusEnum.Executed &&
-    polytoneState.data.hasPolytoneMessages
+    relayState.data.hasCrossChainMessages
 
   return {
     action:
@@ -165,13 +170,13 @@ export const useProposalActionState = ({
       // Show if anyone can execute OR if the wallet is a member, once
       // polytone messages that need relaying are done loading.
       (!config.only_members_execute || isMember) &&
-      !polytoneState.loading
+      !relayState.loading
         ? {
             label: t('button.execute'),
             Icon: Key,
             loading: actionLoading,
-            doAction: polytoneState.data.needsSelfRelay
-              ? polytoneState.data.openPolytoneRelay
+            doAction: relayState.data.needsSelfRelay
+              ? relayState.data.openSelfRelay
               : onExecute,
             header: allowMemoOnExecute ? (
               <TextInput
@@ -197,22 +202,22 @@ export const useProposalActionState = ({
           }
         : // If executed and has polytone messages that need relaying...
         statusKey === ProposalStatusEnum.Executed &&
-          !polytoneState.loading &&
-          polytoneState.data.needsSelfRelay &&
+          !relayState.loading &&
+          relayState.data.needsSelfRelay &&
           !loadingExecutionTxHash.loading &&
           loadingExecutionTxHash.data
         ? {
             label: t('button.relay'),
             Icon: Send,
             loading: actionLoading,
-            doAction: polytoneState.data.openPolytoneRelay,
+            doAction: relayState.data.openSelfRelay,
             description: t('error.polytoneExecutedNoRelay'),
           }
         : undefined,
-    footer: (showPolytone || isWalletConnected) && (
+    footer: (showRelayStatus || isWalletConnected) && (
       <div className="flex flex-col gap-6">
-        {showPolytone && (
-          <ProposalCrossChainRelayStatus state={polytoneState.data} />
+        {showRelayStatus && (
+          <ProposalCrossChainRelayStatus state={relayState.data} />
         )}
 
         {isWalletConnected && <ProfileProposalCard />}
