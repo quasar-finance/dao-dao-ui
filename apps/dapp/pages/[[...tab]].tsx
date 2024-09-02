@@ -2,7 +2,6 @@
 // See the "LICENSE" file in the root directory of this package for more copyright information.
 
 import { GetStaticPaths, GetStaticProps } from 'next'
-
 import { serverSideTranslations } from '@dao-dao/i18n/serverSideTranslations'
 import {
   daoQueries,
@@ -35,7 +34,6 @@ export const getStaticProps: GetStaticProps<StatefulHomeProps> = async ({
   const tabPath =
     params?.tab && Array.isArray(params?.tab) ? params.tab[0] : undefined
 
-  // If defined, try to find matching chain. If found, show chain-only page.
   const selectedChain = tabPath
     ? getSupportedChains().find(({ name }) => name === tabPath)
     : undefined
@@ -45,13 +43,10 @@ export const getStaticProps: GetStaticProps<StatefulHomeProps> = async ({
     ? selectedChain.noGov
       ? undefined
       : [getDaoInfoForChainId(chainId, [])]
-    : // Get chain x/gov DAOs if not on a chain-specific home.
-      [
-        // Add DAO DAO-supported chains.
+    : [
         ...getSupportedChains().flatMap(({ chainId, noGov }) =>
           noGov ? [] : chainId
         ),
-        // Add some other common chains.
         ...(MAINNET
           ? [
               'akashnet-2',
@@ -65,10 +60,7 @@ export const getStaticProps: GetStaticProps<StatefulHomeProps> = async ({
       ].map((chainId) => getDaoInfoForChainId(chainId, []))
 
   const [i18nProps, tvl, allStats, monthStats, weekStats] = await Promise.all([
-    // Get i18n translations props.
     serverSideTranslations(locale, ['translation']),
-
-    // Get all or chain-specific stats and TVL.
     !chainId || chainIsIndexed(chainId)
       ? queryClient
           .fetchQuery(
@@ -79,7 +71,7 @@ export const getStaticProps: GetStaticProps<StatefulHomeProps> = async ({
           )
           .catch((error) => {
             console.error(`Error fetching TVL for chain ${chainId}:`, error)
-            return 0 // Default value
+            return 0
           })
       : 0,
     !chainId || chainIsIndexed(chainId)
@@ -92,9 +84,9 @@ export const getStaticProps: GetStaticProps<StatefulHomeProps> = async ({
           )
           .catch((error) => {
             console.error(`Error fetching stats for chain ${chainId}:`, error)
-            return { total: 0, unique: 0, active: 0 } // Default value
+            return null as DaoDaoIndexerChainStats | null
           })
-      : { total: 0, unique: 0, active: 0 },
+      : null,
     !chainId || chainIsIndexed(chainId)
       ? queryClient
           .fetchQuery(
@@ -111,9 +103,9 @@ export const getStaticProps: GetStaticProps<StatefulHomeProps> = async ({
               `Error fetching 30-day stats for chain ${chainId}:`,
               error
             )
-            return { total: 0, unique: 0, active: 0 } // Default value
+            return null as DaoDaoIndexerChainStats | null
           })
-      : { total: 0, unique: 0, active: 0 },
+      : null,
     !chainId || chainIsIndexed(chainId)
       ? queryClient
           .fetchQuery(
@@ -130,11 +122,10 @@ export const getStaticProps: GetStaticProps<StatefulHomeProps> = async ({
               `Error fetching 7-day stats for chain ${chainId}:`,
               error
             )
-            return { total: 0, unique: 0, active: 0 } // Default value
+            return null as DaoDaoIndexerChainStats | null
           })
-      : { total: 0, unique: 0, active: 0 },
+      : null,
 
-    // Pre-fetch featured DAOs.
     queryClient
       .fetchQuery(daoQueries.listFeatured())
       .then((featured) =>
@@ -150,45 +141,53 @@ export const getStaticProps: GetStaticProps<StatefulHomeProps> = async ({
       }),
   ])
 
+  const stats = {
+    all: allStats || {
+      daos: 0,
+      proposals: 0,
+      votes: 0,
+      uniqueVoters: 0,
+    },
+    month: monthStats || {
+      daos: 0,
+      proposals: 0,
+      votes: 0,
+      uniqueVoters: 0,
+    },
+    week: weekStats || {
+      daos: 0,
+      proposals: 0,
+      votes: 0,
+      uniqueVoters: 0,
+    },
+    tvl,
+    chains: chainId ? 1 : getSupportedChains().length,
+  }
+
   return {
     props: {
       ...i18nProps,
-      // Chain-specific home page.
       ...(chainId && { chainId }),
-      // All or chain-specific stats.
-      stats: {
-        all: allStats,
-        month: monthStats,
-        week: weekStats,
-        tvl,
-        // If chain is 1, it will not be shown.
-        chains: chainId ? 1 : getSupportedChains().length,
-      },
-      // Chain x/gov DAOs.
+      stats,
       ...(chainGovDaos && { chainGovDaos }),
-      // Dehydrate react-query state with featured DAOs preloaded.
       reactQueryDehydratedState: dehydrateSerializable(queryClient),
     },
-    // Revalidate every 6 hours.
     revalidate: 6 * 60 * 60,
   }
 }
 
 export const getStaticPaths: GetStaticPaths = () => ({
   paths: [
-    // Index page with no tab specified.
     {
       params: {
         tab: [],
       },
     },
-    // All tabs.
     ...Object.values(AccountTabId).map((tab) => ({
       params: {
         tab: [tab],
       },
     })),
-    // All chains.
     ...getSupportedChains().map(({ name }) => ({
       params: {
         tab: [name],
