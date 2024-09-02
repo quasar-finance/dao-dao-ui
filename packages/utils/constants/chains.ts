@@ -1716,7 +1716,7 @@ export const SUPPORTED_CHAINS: SupportedChainConfig[] = [
       govProp: 'https://testnet.ping.pub/Quasar%20Test/gov/REPLACE',
       wallet: 'https://testnet.ping.pub/Quasar%20Test/account/REPLACE',
     },
-    codeIdsVersion: ContractVersion.V240,
+    codeIdsVersion: ContractVersion.V230,
     codeIds: {
       // https://github.com/CosmWasm/cw-plus
       Cw1Whitelist: 60,
